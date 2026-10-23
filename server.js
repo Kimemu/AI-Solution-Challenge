@@ -2,9 +2,10 @@
 const http = require("node:http");
 const fs = require("node:fs/promises");
 const path = require("node:path");
+const { networkInterfaces } = require("node:os");
 const { handleApi } = require("./server/api");
 const port = Number(process.env.PORT || 8001);
-const hostname = "127.0.0.1";
+const hostname = process.env.HOST || "127.0.0.1";
 const root = __dirname;
 const types = {
   ".html": "text/html; charset=utf-8",
@@ -16,7 +17,18 @@ const types = {
   ".json": "application/json; charset=utf-8",
 };
 const server = http.createServer(async (incoming, outgoing) => {
-  const url = new URL(incoming.url, `http://${hostname}:${port}`);
+  let url;
+  try {
+    // 팀원의 브라우저가 접속한 주소를 사용해야 동일 출처 API 쓰기가 허용됩니다.
+    const origin = new URL(`http://${incoming.headers.host}`);
+    if (!incoming.url.startsWith("/") || incoming.url.startsWith("//"))
+      throw new Error("Invalid request target");
+    url = new URL(incoming.url, origin);
+  } catch {
+    outgoing.writeHead(400);
+    outgoing.end("Bad request");
+    return;
+  }
   const fileOrigin = incoming.headers.origin === "null";
   if (fileOrigin) {
     outgoing.setHeader("Access-Control-Allow-Origin", "null");
@@ -120,10 +132,25 @@ function openBrowser(url) {
 }
 if (require.main === module) {
   server.listen(port, hostname, () => {
-    const url = "http://" + hostname + ":" + port + "/";
+    const localHost = ["0.0.0.0", "::"].includes(hostname)
+      ? "127.0.0.1"
+      : hostname;
+    const url = `http://${localHost}:${port}/`;
     console.log(
       "ORBITAL: " + url + "\nStop: Ctrl+C. Database: data/orbital.sqlite",
     );
+    if (hostname === "0.0.0.0") {
+      console.log("Team access (same Wi-Fi / LAN):");
+      const addresses = new Set(
+        Object.values(networkInterfaces())
+          .flat()
+          .filter((entry) => entry.family === "IPv4" && !entry.internal)
+          .map((entry) => entry.address),
+      );
+      for (const address of addresses)
+        console.log(`  http://${address}:${port}/`);
+      console.log("Keep this window open. All visitors share this database.");
+    }
     if (process.argv.includes("--open")) openBrowser(url);
   });
 }

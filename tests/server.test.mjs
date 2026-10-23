@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import http from "node:http";
 import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "orbital-test-"));
@@ -59,6 +60,53 @@ test("the dependency-free server serves HTML, protects internal files and suppor
   assert.ok(
     (await response.json()).records.some((record) => record.id === created.id),
   );
+  // LAN 접속 주소와 수신 주소가 달라도 같은 출처의 팀원 쓰기가 성공해야 합니다.
+  const teamOrigin = "http://192.168.1.20:" + server.address().port;
+  const teamResult = await new Promise((resolve, reject) => {
+    const request = http.request(
+      base + "/api/records",
+      {
+        method: "POST",
+        headers: {
+          Host: new URL(teamOrigin).host,
+          Origin: teamOrigin,
+          "Content-Type": "application/json",
+        },
+      },
+      (result) => {
+        let body = "";
+        result.setEncoding("utf8");
+        result.on("data", (chunk) => (body += chunk));
+        result.on("end", () => resolve({ status: result.statusCode, body }));
+      },
+    );
+    request.on("error", reject);
+    request.end(
+      JSON.stringify({
+        kind: "opportunity",
+        data: {
+          title: "팀원이 작성한 안건",
+          category: "space",
+          thesis: "다른 브라우저에서도 같은 자료를 조회한다.",
+          scores: { fit: 3, demand: 3, economics: 3, moat: 3 },
+          amount: null,
+        },
+      }),
+    );
+  });
+  assert.equal(teamResult.status, 200, teamResult.body);
+  const teamRecord = JSON.parse(teamResult.body);
+  response = await fetch(base + "/api/state");
+  assert.ok(
+    (await response.json()).records.some(
+      (record) => record.id === teamRecord.id,
+    ),
+  );
+  response = await fetch(base + "/api/records", {
+    method: "OPTIONS",
+    headers: { Origin: base, "Access-Control-Request-Method": "POST" },
+  });
+  assert.equal(response.status, 204);
   response = await fetch(base + "/api/records", {
     method: "POST",
     headers: {

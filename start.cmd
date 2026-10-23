@@ -1,5 +1,8 @@
 @echo off
+setlocal
 cd /d "%~dp0"
+set "HOST=127.0.0.1"
+if "%~1"=="--team" set "HOST=0.0.0.0"
 where node >nul 2>nul
 if errorlevel 1 (
   echo Install Node.js 24 LTS, then run this file again.

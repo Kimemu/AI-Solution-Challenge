@@ -1374,7 +1374,7 @@
       </div>
       <div class="top-actions">
         <span class="private-tag"
-          >${ShieldCheck({ size: 12 })} 내 PC 워크스페이스</span
+          >${ShieldCheck({ size: 12 })} ORBITAL 워크스페이스</span
         ><button
           class="icon-btn"
           ${attributes({ onClick: download })}

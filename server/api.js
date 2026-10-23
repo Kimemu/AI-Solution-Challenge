@@ -30,7 +30,7 @@ async function handleApi(request, path) {
           { status: 403 },
         );
     }
-    const actor = "로컬 사용자";
+    const actor = "워크스페이스 사용자";
     if (request.method === "GET" && path === "update-manifest")
       return Response.json({
         revision: "orbital-updater-v1",
