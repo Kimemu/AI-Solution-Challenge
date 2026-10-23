@@ -1,0 +1,130 @@
+/** 외부 패키지 없이 실행하는 로컬 HTTP 서버입니다. node server.js */
+const http = require("node:http");
+const fs = require("node:fs/promises");
+const path = require("node:path");
+const { handleApi } = require("./server/api");
+const port = Number(process.env.PORT || 8001);
+const hostname = "127.0.0.1";
+const root = __dirname;
+const types = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".json": "application/json; charset=utf-8",
+};
+const server = http.createServer(async (incoming, outgoing) => {
+  const url = new URL(incoming.url, `http://${hostname}:${port}`);
+  const fileOrigin = incoming.headers.origin === "null";
+  if (fileOrigin) {
+    outgoing.setHeader("Access-Control-Allow-Origin", "null");
+    outgoing.setHeader("Vary", "Origin");
+  }
+  if (incoming.method === "OPTIONS") {
+    if (!fileOrigin && incoming.headers.origin !== url.origin) {
+      outgoing.writeHead(403);
+      outgoing.end();
+      return;
+    }
+    outgoing.setHeader("Access-Control-Allow-Methods", "GET, POST, PATCH");
+    outgoing.setHeader("Access-Control-Allow-Headers", "Content-Type");
+    outgoing.writeHead(204);
+    outgoing.end();
+    return;
+  }
+  try {
+    if (url.pathname.startsWith("/api/")) {
+      const chunks = [];
+      let length = 0;
+      for await (const chunk of incoming) {
+        length += chunk.length;
+        if (length > 200000) {
+          outgoing.writeHead(413, { "Content-Type": "application/json" });
+          outgoing.end(JSON.stringify({ error: "요청이 너무 큽니다." }));
+          return;
+        }
+        chunks.push(chunk);
+      }
+      const headers = new Headers();
+      for (const [name, value] of Object.entries(incoming.headers))
+        if (value && !(fileOrigin && name === "origin"))
+          headers.set(name, Array.isArray(value) ? value.join(",") : value);
+      const body = Buffer.concat(chunks);
+      const request = new Request(url, {
+        method: incoming.method,
+        headers,
+        body: ["GET", "HEAD"].includes(incoming.method) ? undefined : body,
+      });
+      const response = await handleApi(request, url.pathname.slice(5));
+      outgoing.writeHead(response.status, Object.fromEntries(response.headers));
+      outgoing.end(Buffer.from(await response.arrayBuffer()));
+      return;
+    }
+    const pathname = decodeURIComponent(
+      url.pathname === "/" ? "/index.html" : url.pathname,
+    );
+    if (!/^\/(index\.html|css\/|js\/|assets\/)/.test(pathname)) {
+      outgoing.writeHead(404);
+      outgoing.end("Not found");
+      return;
+    }
+    const filename = path.resolve(root, "." + pathname);
+    if (!filename.startsWith(root + path.sep)) {
+      outgoing.writeHead(403);
+      outgoing.end("Forbidden");
+      return;
+    }
+    const data = await fs.readFile(filename);
+    outgoing.writeHead(200, {
+      "Content-Type":
+        types[path.extname(filename)] || "application/octet-stream",
+      "Cache-Control": "no-cache",
+    });
+    outgoing.end(data);
+  } catch (error) {
+    outgoing.writeHead(error.code === "ENOENT" ? 404 : 500, {
+      "Content-Type": "application/json; charset=utf-8",
+    });
+    outgoing.end(
+      JSON.stringify({
+        error:
+          error.code === "ENOENT"
+            ? "파일을 찾을 수 없습니다."
+            : "서버 요청을 처리하지 못했습니다.",
+      }),
+    );
+  }
+});
+server.on("error", (error) => {
+  console.error(
+    error.code === "EADDRINUSE"
+      ? `Port ${port} is already in use. Open http://${hostname}:${port}/ or choose another PORT.`
+      : error.message,
+  );
+  process.exitCode = 1;
+});
+function openBrowser(url) {
+  const { spawn } = require("node:child_process");
+  const command =
+    process.platform === "win32"
+      ? "rundll32.exe"
+      : process.platform === "darwin"
+        ? "open"
+        : "xdg-open";
+  const args =
+    process.platform === "win32" ? ["url.dll,FileProtocolHandler", url] : [url];
+  const child = spawn(command, args, { stdio: "ignore", windowsHide: true });
+  child.on("error", () => console.log("Open " + url + " in your browser."));
+}
+if (require.main === module) {
+  server.listen(port, hostname, () => {
+    const url = "http://" + hostname + ":" + port + "/";
+    console.log(
+      "ORBITAL: " + url + "\nStop: Ctrl+C. Database: data/orbital.sqlite",
+    );
+    if (process.argv.includes("--open")) openBrowser(url);
+  });
+}
+module.exports = { server };

@@ -1,76 +1,79 @@
 # ORBITAL · AI Solution Challenge
 
-위성 활용 정보를 모아 **사업 기회 검토 → 의사결정 → 가정·실적 관리**로 연결하는 전략 인텔리전스 대시보드입니다.
+**화면은 `index.html`, 백엔드는 일반 JavaScript입니다. React·Next·TypeScript·번들러를 제거했습니다.**
 
-기존 팀 프로젝트의 업무 흐름을 유지하면서, 위성 지형·구름·도시 불빛과 주황색 거점이 표시되는 3D 지구본으로 개선했습니다.
+`npm install`, `npm run dev`, 빌드 명령 없이 실행합니다. 뉴스 수집과 입력 데이터 저장에는 Node.js가 필요합니다.
 
-![ORBITAL 지구본과 분야별 정보 화면](docs/orbital-preview.png)
+![HTML 버전 지구본 화면](docs/orbital-preview.png)
 
 ## 실행
 
-Node.js **22.13 이상**, pnpm **11.25.0**이 필요합니다. 검증 환경은 Windows / Node.js 24입니다.
+1. Node.js **22.13 이상**이 설치된 PC에서 실행합니다. 검증 환경은 Node.js 24입니다.
+2. **`start.cmd`를 더블클릭**합니다.
+3. 백엔드가 준비되면 브라우저에서 [http://127.0.0.1:8001](http://127.0.0.1:8001)이 열립니다.
+
+종료할 때는 실행 창에서 `Ctrl+C`를 누릅니다. 저장 내용은 `data/orbital.sqlite`에 남아 다음 실행에도 유지됩니다.
+
+터미널로 실행하려면 다음 한 줄이면 됩니다.
 
 ```powershell
-npm run install:ci
-npm run build
-npm run db:setup
-npm run dev -- --hostname 127.0.0.1
+node server.js
 ```
 
-브라우저에서 [http://127.0.0.1:5173](http://127.0.0.1:5173)을 엽니다. 처음 조회할 때 기초자료 6건과 검토 예시 3건을 생성합니다. `지금 수집`은 실제 RSS 피드를 요청하므로 인터넷 연결이 필요합니다. 이후 실행은 `npm run dev`만으로 가능합니다.
+`package.json`은 Node.js의 모듈 형식을 지정할 뿐이며 설치할 패키지나 실행 스크립트가 없습니다.
 
-`db:setup`은 로컬 DB 테이블이 이미 있으면 데이터를 유지합니다. 데이터는 Git에서 제외되는 `.wrangler/state/`에 저장됩니다. 서버 종료는 실행 터미널에서 Ctrl+C를 누릅니다.
+## index.html을 직접 열 때
 
-## 주요 기능
+`index.html`을 더블클릭하면 화면·지구본·저장된 뉴스 미리보기가 열립니다. 백엔드가 이미 실행 중이면 수집·저장 API도 연결됩니다. 백엔드가 꺼져 있으면 미리보기 안내가 표시되며 저장이나 실시간 수집은 실행되지 않습니다.
 
-- **글로벌 인사이트:** 지구본 거점 탐색, 분야 선택, 최근 수집 정보.
-- **뉴스·지식베이스:** 검색, 분야 필터, 공식 출처 구분, 원문 확인 기록.
-- **사업·투자 검토:** 사업 가설, 근거 자료, 가중 점수와 검토 단계.
-- **의사결정 기록:** 추진·보류·종료의 근거와 조건 저장.
-- **가정·실적 관리:** 목표와 실제 측정값 비교 및 이력.
-- **수집·업데이트:** 8개 RSS 피드의 수집 결과와 소스별 상태.
+HTML 파일 자체가 서버 프로세스를 시작하지는 않습니다. 모든 기능을 사용하려면 `start.cmd`를 한 번 실행하면 됩니다. 이미지·아이콘·국가 좌표도 로컬에 포함했으며 CDN이나 JavaScript 모듈 로딩에 의존하지 않습니다.
 
-지구본은 드래그/방향키로 회전하고, +/−로 확대·축소, Home으로 초기화할 수 있습니다. Space는 자동 회전을 전환합니다. 거점은 Tab/Enter로도 선택할 수 있습니다.
+## 코드를 읽는 순서
 
-## 구현 범위
+| 파일                                  | 역할                                             |
+| ------------------------------------- | ------------------------------------------------ |
+| **`index.html`**                      | CSS와 JavaScript를 읽는 화면의 시작점            |
+| **`js/app.js`**                       | 화면 상태, 메뉴 전환, API 호출, 저장·수집 버튼   |
+| **`js/views.js`**                     | 화면별 HTML 템플릿과 입력 폼                     |
+| `js/config.js`                        | 사업 분야·RSS 소스·점수 기준. 서버와 화면이 공유 |
+| `js/ui.js`                            | HTML 텍스트 이스케이프와 DOM 이벤트 연결         |
+| `js/selectors.js`                     | 검색·필터·집계                                   |
+| `js/globe.js`                         | 지구본 마우스·키보드·거점 조작                   |
+| `js/globe-core.js`                    | 지구 좌표 변환과 WebGL 렌더링                    |
+| **`server.js`**                       | HTTP 서버, 화면 파일 제공, API 연결              |
+| `server/api.js`                       | API 경로별 분배                                  |
+| `server/records.js`                   | 안건·가정·결정·실적의 저장 규칙                  |
+| `server/collection.js` / `signals.js` | RSS 수집·분류·중복 제거                          |
+| `server/database.js` / `sqlite.js`    | SQL 접근과 Node.js 기본 SQLite                   |
+| `css/styles.css` / `globe.css`        | 전체 스타일과 지구본 스타일                      |
 
-현재 정보 분류는 **키워드 규칙**을 사용하고 사업 영향은 **분야별 고정 가설**입니다. LLM·RAG·자동 사실 검증은 포함하지 않습니다. 기사 본문과 계약·금액·일정 등은 원문 확인이 필요합니다.
+화면 문구는 `js/views.js`, 동작은 `js/app.js`, 분야와 가설은 `js/config.js`부터 보면 됩니다. 자세한 구조는 [구조 설명](docs/ARCHITECTURE.md)에 정리했습니다.
 
-거점은 탐색용 대표 좌표입니다. `N건 · 분야 신호`는 **분야 전체의 자료 수**이며 국가별 기사 수가 아닙니다. 국가 선택은 지구본 표시와 연결되며, 기사 데이터에 국가 필드는 없습니다. 구름과 조명은 실시간 관측이 아닌 시각 표현입니다.
+## 유지한 기능
 
-60초마다 저장된 상태를 조회하지만, 이것이 자동 RSS 수집을 실행하지는 않습니다. 지속적인 정시 수집에는 별도의 스케줄러 연결이 필요합니다. 공개 운영 전에는 호스팅 접근 정책과 업무 API의 인증·권한 처리를 별도로 구성해야 합니다.
+- 사진 지형·구름·도시 불빛을 사용하는 지구본, 회전·거점·확대·초기화.
+- 8개 공개 RSS 피드의 실제 수집과 분야별 검색·필터.
+- 검토 안건 등록, 근거 연결, 점수, 단계 변경과 판단 근거.
+- 가정과 목표 등록, 실적 업데이트, 변경 이력.
+- SQLite 영구 저장과 JSON 내보내기.
 
-## 소스 구조
+정시 자동 수집 스케줄러는 연결하지 않았습니다. 화면의 주기적 요청은 저장된 상태를 다시 조회합니다. 현재 분석은 키워드 분류와 분야별 고정 가설이며 LLM이나 자동 사실 검증은 포함하지 않습니다.
 
-```text
-app/
-  page.tsx                 # 대시보드와 업무 화면
-  globals.css              # 스타일 / 마지막 부분에 지구본 디자인
-  components/Globe.tsx     # 지구본·거점·조작
-  api/[...path]/route.ts   # API 진입
-lib/
-  globe-renderer.ts        # WebGL 표면·불빛·구름·대기광
-  globe-geometry.ts        # 좌표 투영·선택
-  strategy-config.ts       # 분야·사업 가설·RSS 소스
-  strategy-server.ts       # 수집 및 업무 API
-db/                        # Drizzle 스키마
-drizzle/                   # 초기 DB SQL
-public/textures/           # 로컬 지구 텍스처 및 출처
-docs/                      # 소스 분석·디자인 명세·원본 보관
-tests/                     # 지구본 좌표 검증
-```
-
-기술: React 19, TypeScript, Vinext/Vite(Next App Router 호환), Cloudflare Workers/D1, Drizzle. 지구본은 WebGL + Canvas 2D + HTML 버튼으로 구성하며 추가 3D 라이브러리를 사용하지 않습니다.
+미리보기 뉴스는 공개 RSS 자료의 저장본이며 현재 실시간 결과가 아닙니다. 지구본의 거점은 탐색용 대표 좌표이고 숫자는 국가별 기사 수가 아닌 분야 전체 수입니다.
 
 ## 검증
 
+추가 패키지 없이 다음 명령으로 검사할 수 있습니다.
+
 ```powershell
-npm run typecheck
-npm run test:globe
-npm run test:workflow
-npm run build
+node --test tests/*.test.mjs
+node tests/workflow.mjs
 ```
 
-좌표·역투영·날짜변경선 테스트 3개와 업무 흐름 검증 26개를 포함합니다. 업무 흐름 검증은 메모리 DB를 사용합니다.
+- 자동 검사 8개: 로컬 HTML 파일 연결, 지구 좌표, 안전한 HTML 표시, HTTP·CORS, SQLite 재연결 등.
+- 업무 흐름 검증 26개: 근거 연결, 수정 충돌, 의사결정, 실적 이력, 수집 중복과 부분 실패 등.
+- GitHub Actions도 npm 설치 없이 같은 검사를 실행합니다.
 
-자세한 인수인계는 [프로젝트 분석](docs/PROJECT-ANALYSIS.md), 시각 명세는 [지구본 디자인](docs/element.md), 이미지 출처는 [텍스처 출처](public/textures/ATTRIBUTION.md)를 참고하세요. 전달받은 프레임워크 설명은 [원본 README](docs/original/README.md.txt)에 보관했습니다.
+자동 브라우저의 정책상 파일 URL 직접 열기는 검증하지 못했습니다. 동일 HTML의 HTTP 실행과 파일 Origin의 API 연결은 확인했습니다.
+
+텍스처 출처는 [이미지 출처](assets/textures/ATTRIBUTION.md), 아이콘과 지도 데이터의 고지는 `assets/`에 있습니다. 기존 프레임워크 버전은 Git 커밋 `e2cb021`에 보존되어 있습니다. 이번 버전은 내 PC에서 실행하는 로컬 앱입니다.

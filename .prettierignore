@@ -1,0 +1,12 @@
+node_modules/
+data/
+outputs/
+dist/
+.next/
+.vinext/
+.sites-runtime/
+.wrangler/
+assets/earth-data.js
+assets/icons.js
+assets/news-snapshot.js
+*.tsbuildinfo

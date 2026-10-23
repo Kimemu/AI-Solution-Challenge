@@ -1,0 +1,178 @@
+// 사업 분야와 점수 기준. 화면과 서버가 이 파일 하나를 함께 사용합니다.
+(function (root) {
+  const sectors = [
+    {
+      id: "maritime",
+      name: "해양·물류",
+      en: "MARITIME",
+      color: "#4ed8c6",
+      affiliate: "한화오션 · 한화시스템",
+      lat: 1.3,
+      lon: 103.8,
+      region: "싱가포르",
+      question: "선박·항만 변화를 구독형 해양 정보 서비스로 전환할 수 있는가?",
+      implication:
+        "SAR·AIS 결합 서비스의 고객 수요, 데이터 조달비와 반복 계약 가능성을 확인할 가설입니다.",
+      check:
+        "AIS 불일치만으로 불법행위를 확정할 수 없습니다. 촬영 간격·해상도·현장 확인이 필요합니다.",
+    },
+    {
+      id: "solar",
+      name: "에너지·태양광",
+      en: "ENERGY",
+      color: "#ffc777",
+      affiliate: "한화솔루션 · 큐셀",
+      lat: 31,
+      lon: -101,
+      region: "미국",
+      question:
+        "위성 기반 일사량 예측으로 발전·ESS 운영 성과를 높일 수 있는가?",
+      implication:
+        "기상·구름 예측 데이터와 발전 실적을 결합한 PoC의 운영비 절감 효과를 검증할 가설입니다.",
+      check:
+        "기상위성·발전소 운영 데이터가 필요하며 광학·SAR 영상만으로 발전량을 직접 측정하지 않습니다.",
+    },
+    {
+      id: "infrastructure",
+      name: "인프라·자산",
+      en: "INFRASTRUCTURE",
+      color: "#97a9ff",
+      affiliate: "사업장 운영 · 자산·보험",
+      lat: 50,
+      lon: 10,
+      region: "유럽",
+      question:
+        "사업장·항만 주변의 지반 변위를 점검 우선순위로 연결할 수 있는가?",
+      implication:
+        "반복 SAR 관측을 통한 변위 분석과 현장 점검의 비용·정확도를 비교할 가설입니다.",
+      check:
+        "InSAR에는 시계열 자료와 전문 처리가 필요합니다. 변위가 구조물 결함을 직접 입증하지는 않습니다.",
+    },
+    {
+      id: "emissions",
+      name: "배출·환경",
+      en: "ENVIRONMENT",
+      color: "#c4a2f5",
+      affiliate: "에너지 운영 · 환경 리스크",
+      lat: 25,
+      lon: 51,
+      region: "중동",
+      question: "전용 위성의 메탄 데이터를 활용한 점검·환경 서비스가 유효한가?",
+      implication:
+        "전용 센서 공급사와 데이터 제휴를 통해 산업시설의 점검 서비스를 검토할 가설입니다.",
+      check:
+        "메탄 측정에는 전용 센서가 필요합니다. 한화의 기존 광학·SAR 위성만으로 가능하다는 의미가 아닙니다.",
+    },
+    {
+      id: "agriculture",
+      name: "농업·금융",
+      en: "AGRI & FINANCE",
+      color: "#a2d586",
+      affiliate: "한화 금융 · 보험 사업 검토",
+      lat: -13,
+      lon: -52,
+      region: "브라질",
+      question:
+        "토양수분·식생 변화를 조달·보험 리스크 평가에 활용할 수 있는가?",
+      implication:
+        "작황·수분 지표와 실제 손실 데이터를 연계해 모델의 설명력과 데이터 비용을 검증할 가설입니다.",
+      check:
+        "위성 지표는 작황·손실의 추정 자료이며 실제 수확량·보험 손해액은 별도로 검증해야 합니다.",
+    },
+    {
+      id: "space",
+      name: "우주·기술",
+      en: "SPACE & TECH",
+      color: "#6db6ff",
+      affiliate: "한화에어로스페이스 · 쎄트렉아이",
+      lat: 36,
+      lon: 128,
+      region: "한국",
+      question: "발사·위성·분석을 연결하는 제휴·투자 기회는 무엇인가?",
+      implication:
+        "실제 발사·계약·실증 결과와 데이터 서비스 수요를 기준으로 투자 후보를 검토할 가설입니다.",
+      check: "발표·MOU·주파수 신청과 확정 계약·매출을 구분해야 합니다.",
+    },
+  ];
+  const stages = [
+    { id: "watch", name: "기회 발굴" },
+    { id: "diligence", name: "투자검토" },
+    { id: "pilot", name: "PoC·실증" },
+    { id: "approved", name: "추진 결정" },
+    { id: "hold", name: "보류" },
+    { id: "rejected", name: "종료" },
+  ];
+  function sectorOf(id) {
+    return sectors.find((x) => x.id === id) || sectors[5];
+  }
+  const SCORE_CRITERIA = [
+    { id: "fit", label: "사업 적합도", weight: 0.3 },
+    { id: "demand", label: "고객 수요", weight: 0.25 },
+    { id: "economics", label: "수익성", weight: 0.25 },
+    { id: "moat", label: "차별성", weight: 0.2 },
+  ];
+  const DEFAULT_SCORES = { fit: 3, demand: 3, economics: 3, moat: 3 };
+  function investmentScore(scores) {
+    return Math.round(
+      SCORE_CRITERIA.reduce(
+        (total, criterion) =>
+          total + (scores[criterion.id] || 1) * criterion.weight,
+        0,
+      ) * 20,
+    );
+  }
+  const sourceFeeds = [
+    {
+      id: "nasa",
+      name: "NASA 공식 뉴스",
+      official: true,
+      category: "space",
+      url: "https://www.nasa.gov/feed/",
+    },
+    {
+      id: "esa",
+      name: "ESA 지구관측",
+      official: true,
+      category: "space",
+      url: "https://www.esa.int/rssfeed/Our_Activities/Observing_the_Earth",
+    },
+    ...sectors.map((s) => ({
+      id: "news-" + s.id,
+      name: s.name + " 뉴스 검색",
+      official: false,
+      category: s.id,
+      url:
+        "https://news.google.com/rss/search?" +
+        new URLSearchParams({
+          q: {
+            maritime:
+              "(satellite OR SAR OR AIS) (maritime OR port OR shipping) when:7d",
+            solar:
+              '(Qcells OR "solar forecasting" OR "satellite irradiance") when:14d',
+            infrastructure:
+              '(InSAR OR "satellite infrastructure" OR "ground motion") when:14d',
+            emissions: "(satellite OR GHGSat) methane when:14d",
+            agriculture:
+              'satellite (agriculture OR crop OR "soil moisture") when:14d',
+            space:
+              '(Hanwha OR "Earth observation") (satellite OR launch OR investment) when:7d',
+          }[s.id],
+          hl: "en-US",
+          gl: "US",
+          ceid: "US:en",
+        }),
+    })),
+  ];
+
+  const config = {
+    sectors,
+    stages,
+    sectorOf,
+    investmentScore,
+    sourceFeeds,
+    SCORE_CRITERIA,
+    DEFAULT_SCORES,
+  };
+  if (typeof module === "object" && module.exports) module.exports = config;
+  else root.OrbitalConfig = config;
+})(typeof window === "undefined" ? globalThis : window);
