@@ -109,10 +109,34 @@ const server = http.createServer(async (incoming, outgoing) => {
     );
   }
 });
-server.on("error", (error) => {
+server.on("error", async (error) => {
+  const url = `http://${["0.0.0.0", "::"].includes(hostname) ? "127.0.0.1" : hostname}:${port}/`;
+  if (error.code === "EADDRINUSE") {
+    try {
+      const response = await fetch(url + "api/update-manifest", {
+        signal: AbortSignal.timeout(2500),
+        redirect: "error",
+      });
+      const manifest = await response.json();
+      if (response.ok && manifest.revision === "orbital-updater-v1") {
+        console.log(
+          "ORBITAL is already running. Opening existing server: " + url,
+        );
+        console.log("Keep the original server window open.");
+        if (hostname === "0.0.0.0")
+          console.log(
+            "For team access, the original server must be started with start-team.cmd.",
+          );
+        if (process.argv.includes("--open")) openBrowser(url);
+        return;
+      }
+    } catch {
+      // 다른 서비스이거나 응답하지 않는 포트는 재사용하지 않습니다.
+    }
+  }
   console.error(
     error.code === "EADDRINUSE"
-      ? `Port ${port} is already in use. Open http://${hostname}:${port}/ or choose another PORT.`
+      ? `Port ${port} is used by another service or an unresponsive server. ORBITAL could not reuse it.`
       : error.message,
   );
   process.exitCode = 1;

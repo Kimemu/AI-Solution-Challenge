@@ -4,6 +4,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import http from "node:http";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "orbital-test-"));
@@ -23,6 +25,17 @@ test("the dependency-free server serves HTML, protects internal files and suppor
     );
     fs.rmSync(temporary, { recursive: true, force: true });
   });
+  const repeated = await promisify(execFile)(process.execPath, ["server.js"], {
+    cwd: path.resolve(import.meta.dirname, ".."),
+    env: {
+      ...process.env,
+      HOST: "127.0.0.1",
+      PORT: String(server.address().port),
+    },
+    timeout: 10000,
+  });
+  assert.match(repeated.stdout, /Opening existing server/);
+  assert.equal(repeated.stderr, "");
   let response = await fetch(base + "/");
   assert.equal(response.status, 200);
   assert.match(await response.text(), /<title>ORBITAL/);
@@ -116,4 +129,24 @@ test("the dependency-free server serves HTML, protects internal files and suppor
     body: "{}",
   });
   assert.equal(response.status, 403);
+});
+
+test("an unrelated occupied port is not treated as ORBITAL", async (t) => {
+  const other = http.createServer((_request, response) =>
+    response.end("Other service"),
+  );
+  await new Promise((resolve) => other.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise((resolve) => other.close(resolve)));
+  await assert.rejects(
+    promisify(execFile)(process.execPath, ["server.js"], {
+      cwd: path.resolve(import.meta.dirname, ".."),
+      env: {
+        ...process.env,
+        HOST: "127.0.0.1",
+        PORT: String(other.address().port),
+      },
+      timeout: 10000,
+    }),
+    (error) => error.code === 1 && /another service/.test(error.stderr),
+  );
 });
