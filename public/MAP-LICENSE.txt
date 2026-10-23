@@ -1,0 +1,1 @@
+World map: Natural Earth public-domain geographic data, distributed by world-atlas v2 (ISC). Source: https://github.com/topojson/world-atlas ; Natural Earth: https://www.naturalearthdata.com/about/terms-of-use/ . Country outlines are generalized and do not constitute a position on boundaries.
