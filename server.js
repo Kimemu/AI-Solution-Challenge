@@ -191,6 +191,7 @@ if (require.main === module) {
     require("./server/article-worker")
       .startArticleWorker()
       .catch((error) => console.error("AI worker:", error.message));
+    require("./server/headline-translations").startHeadlineTranslationWorker();
     require("./server/research").resumeResearchJobs();
   });
 }

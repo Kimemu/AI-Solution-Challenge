@@ -69,8 +69,7 @@
     if (!m.currentSession) return null;
     const steps = [
       ["pipeline", "사업·투자 검토", m.opportunities.length],
-      ["decisions", "판단 초안", m.decisions.length],
-      ["performance", "검증 지표", m.assumptions.length],
+      ["decisions", "의사결정 로그", m.decisions.length],
       ["reports", "최종보고서", 1],
     ];
     return html`<div class="workflow-links">
@@ -89,7 +88,7 @@
       <div class="article-eyebrow">
         <span>${article.source}</span><time>${date(article.publishedAt)}</time>
       </div>
-      <h3>${window.OrbitalResearchCore.headline(article)}</h3>
+      <h3>${article.titleKo || window.OrbitalResearchCore.headline(article)}</h3>
       <p>${summary || "클릭하면 한국어 요약을 자동으로 준비합니다."}</p>
       <div class="article-tags">
         <span
@@ -117,7 +116,7 @@
           <span class="eyebrow">RELATED ARTICLES</span>
           <h2>
             ${m.research.selectedKeyword
-              ? `'${m.research.selectedKeyword}' 관련 기사`
+              ? `'${m.research.keywords?.find((item) => item.word === m.research.selectedKeyword)?.labelKo || m.research.selectedKeyword}' 관련 기사`
               : "관련 기사"}<small>${m.researchArticles.length}</small>
           </h2>
         </div>
@@ -326,7 +325,7 @@
             <div class="keyword-cloud">
               ${visibleKeywords.map(
                 (keyword, index) =>
-                  html`<button${a({ className: "keyword-chip " + (r.selectedKeyword === keyword.word ? "selected" : ""), disabled: r.searching || r.starting, onClick: () => chooseKeyword(keyword.word) })}><small>${String(index + 1).padStart(2, "0")}</small><span>${keyword.word}</span><b>${keyword.count}</b></button>`,
+                  html`<button${a({ className: "keyword-chip " + (r.selectedKeyword === keyword.word ? "selected" : ""), disabled: r.searching || r.starting, onClick: () => chooseKeyword(keyword.word) })}><small>${String(index + 1).padStart(2, "0")}</small><span>${keyword.labelKo || keyword.word}</span><b>${keyword.count}</b></button>`,
               )}
             </div>
             ${!keywords.length &&
@@ -349,7 +348,7 @@
       html`<div class="analysis-heading">
           <div>
             <span class="eyebrow">CONNECTED WORKSPACE</span>
-            <h2>${r.selectedKeyword} <small>분석 워크스페이스</small></h2>
+            <h2>${r.keywords?.find((item) => item.word === r.selectedKeyword)?.labelKo || r.selectedKeyword} <small>분석 워크스페이스</small></h2>
           </div>
           <div class="analysis-numbers">
             <span><b>${m.researchArticles.length}</b>기사</span
@@ -387,6 +386,12 @@
       .sort((a, b) => b.score - a.score);
     const focus =
       ideas.find((idea) => idea.id === report.focusOpportunityId) || ideas[0];
+    const evidenceIds = new Set(
+      ideas.flatMap((idea) => idea.evidenceIds || []),
+    );
+    const evidenceArticles = m.state.signals.filter((signal) =>
+      evidenceIds.has(signal.id),
+    );
     return html`<div class="report-toolbar">
         <div>
           <span class="status-tag good"
@@ -561,39 +566,18 @@
           ["08", "위험요인과 대응", report.risks],
         ].map(([num, title, text]) => reportSection(num, title, text))}
         <section class="report-section">
-          <h2><span>09</span>기사 근거와 검증 계획</h2>
-          <p>
-            아이디어별 근거 기사
-            ${new Set(ideas.flatMap((idea) => idea.evidenceIds || [])).size}건 ·
-            검증 지표
-            ${m.state.records.filter(
-              (record) =>
-                record.kind === "assumption" &&
-                record.researchId === report.researchId,
-            ).length}개
-          </p>
+          <h2><span>09</span>근거 기사</h2>
+          <p>근거 기사 ${evidenceIds.size}건</p>
           <div class="report-evidence">
-            ${m.state.signals
-              .filter((signal) =>
-                ideas.some((idea) => idea.evidenceIds.includes(signal.id)),
-              )
-              .map(
-                (article) =>
-                  html`<button${a({ onClick: () => m.openArticle(article) })}><span>${date(article.publishedAt)} · ${article.source}</span><b>${article.title}</b>${icon("ArrowUpRight", 14)}</button>`,
-              )}
+            ${evidenceArticles
+              .slice(0, 3)
+              .map((article) => reportEvidence(article, m))}
           </div>
-          <p class="report-footnote">
-            PDF에는 연결된 근거 기사의 링크와 검증 지표·목표·측정 상태를 함께
-            출력합니다. 실적은 측정 전 상태로 보존합니다.
-          </p>
+          ${evidenceArticles.length > 3 && html`<details class="report-evidence-disclosure">
+            <summary><span class="report-evidence-expand">전체보기 ${evidenceArticles.length - 3}건</span><span class="report-evidence-collapse">접기</span></summary>
+            <div class="report-evidence">${evidenceArticles.slice(3).map((article) => reportEvidence(article, m))}</div>
+          </details>`}
         </section>
-        <div class="report-references">
-          보고서 양식 참고:
-          ${config.templateSources.map(
-            (source) =>
-              html`<a${a({ href: source.url, target: "_blank", rel: "noopener noreferrer" })}>${source.name} ↗</a>`,
-          )}
-        </div>
       </article>`;
   }
   function reportSection(number, title, value) {
@@ -601,6 +585,9 @@
       <h2><span>${number}</span>${title}</h2>
       <p>${value}</p>
     </section>`;
+  }
+  function reportEvidence(article, m) {
+    return html`<button${a({ onClick: () => m.openArticle(article) })}><span>${date(article.publishedAt)} · ${article.source}</span><b>${article.titleKo || article.title}</b>${icon("ArrowUpRight", 14)}</button>`;
   }
   function sources(m) {
     const job = m.research.discovery;
@@ -708,7 +695,7 @@
     if (modal.type === "draft-decision") {
       const d = modal.data;
       return {
-        title: "자동 판단 초안 수정",
+        title: "의사결정 로그 수정",
         body: html`<form
           class="editor-form"
           ${a({
@@ -726,7 +713,7 @@
           })}
         >
           <p class="form-note">
-            이 기록은 검토 제안 초안입니다. 확정 결정은 안건의 의사결정 기록에서
+            자동 생성된 검토 제안입니다. 확정 결정은 안건의 의사결정 로그에서
             별도로 남길 수 있습니다.
           </p>
           <label
@@ -756,7 +743,7 @@
               ${a({ value: d.conditions })}
             ></textarea></label
           ><button class="primary" ${a({ disabled: busy })}>
-            판단 초안 저장
+            의사결정 로그 저장
           </button>
         </form>`,
       };

@@ -81,6 +81,7 @@ async function runNext({
     if (!latest) throw new Error("분석 대상 기사가 없습니다.");
     const signal = JSON.parse(latest.data);
     signal.feedSummary ??= signal.summary;
+    signal.titleKo = result.titleKo || signal.titleKo || signal.title;
     signal.summary = result.summary;
     signal.articleAnalysis = {
       ...article,

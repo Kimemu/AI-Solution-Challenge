@@ -124,7 +124,7 @@ async function getState() {
   const [sig, rec, logs, runs] = await Promise.all([
     db()
       .prepare(
-        "SELECT s.* FROM signals s WHERE json_extract(s.data,'$.lastSeenAt') IS NOT NULL OR s.id LIKE 'reference-%' OR EXISTS (SELECT 1 FROM records r, json_each(r.data, '$.evidenceIds') e WHERE r.kind='opportunity' AND e.value=s.id) ORDER BY COALESCE(json_extract(s.data,'$.lastSeenAt'),s.collected_at) DESC LIMIT 500",
+        "SELECT s.* FROM signals s WHERE json_extract(s.data,'$.lastSeenAt') IS NOT NULL OR s.id LIKE 'reference-%' OR EXISTS (SELECT 1 FROM records r, json_each(r.data, '$.evidenceIds') e WHERE r.kind='opportunity' AND e.value=s.id) ORDER BY COALESCE(json_extract(s.data,'$.lastSeenAt'),s.collected_at) DESC LIMIT 2000",
       )
       .all(),
     db()

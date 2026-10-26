@@ -250,14 +250,14 @@
             "knowledge" && window.OrbitalResearchViews.explore(model, true)}${![
             "overview",
             "knowledge",
+            "performance",
             "reports",
             "sources",
           ].includes(view) &&
           window.OrbitalResearchViews.workflow(model)}${(view === "pipeline" ||
           view === "reports") && renderPortfolioTabs({ ...model })}${view ===
           "pipeline" && renderPipeline({ ...model })}${view === "decisions" &&
-          renderDecisions({ ...model })}${view === "performance" &&
-          renderPerformance({ ...model })}${view === "sources" &&
+          renderDecisions({ ...model })}${view === "sources" &&
           window.OrbitalResearchViews.sources(model)}${view === "reports" &&
           window.OrbitalResearchViews.reports(model)}
           <footer class="page-footer">
@@ -309,7 +309,7 @@
         })}
       >
         <section
-          class="modal"
+          class="modal${modal.type === "opportunity" && modal.data?.id ? " opportunity-report-modal" : ""}"
           role="dialog"
           aria-modal="true"
           aria-labelledby="modal-title"
@@ -319,11 +319,12 @@
               <span class="eyebrow">STRATEGY WORKSPACE</span>
               <h2 id="modal-title">
                 ${{
-                  signal: "신호 상세 · 사업영향",
+                  signal: "뉴스 기사 요약",
                   opportunity: modal.data?.id
-                    ? "검토 안건"
+                    ? "사업·투자 검토 보고안"
                     : "새로운 검토 안건",
-                  decision: "의사결정 기록",
+                  "opportunity-edit": "검토 안건 수정",
+                  decision: "의사결정 로그",
                   assumption: modal.data?.id ? "가정 수정" : "가정 등록",
                   actual: "실적 업데이트",
                 }[modal.type] || custom?.title}
@@ -339,16 +340,21 @@
           </div>
           ${custom?.body}${modal.type === "signal" &&
           renderSignalDetail({
-            setView: setView,
-            busy: busy,
             modal: modal,
+          })}${modal.type === "opportunity" && modal.data?.id &&
+          renderOpportunityReport({
+            data: modal.data,
+            signals: signals,
+            assumptions: assumptions.filter(
+              (a) => a.opportunityId === modal.data?.id,
+            ),
+            decisions: decisions.filter(
+              (d) => d.opportunityId === modal.data?.id,
+            ),
             setModal: setModal,
-            opportunities: opportunities,
-            performances: performances,
-            save: save,
-            promote: promote,
-            extractKeywords,
-          })}${modal.type === "opportunity" &&
+            openArticle: extra.openArticle,
+          })}${(modal.type === "opportunity-edit" ||
+          (modal.type === "opportunity" && !modal.data?.id)) &&
           renderOpportunityForm({
             data: modal.data,
             signals: signals,
@@ -359,6 +365,7 @@
               (d) => d.opportunityId === modal.data?.id,
             ),
             busy: busy,
+            onCancel: () => setModal({ type: "opportunity", data: modal.data }),
             onSave: async (d) => {
               if (modal.data?.id)
                 await save(
@@ -457,13 +464,12 @@
         <button class="primary" ${attributes({ disabled: busy })}>
           ${busy
             ? Loader2({ size: 14, className: "spin" })
-            : FileCheck2({ size: 14 })}${" "}결정
-          기록 저장
+            : FileCheck2({ size: 14 })}${" "}의사결정 로그 저장
         </button>
       </div>
     </form>`;
   }
-  // 의사결정 기록
+  // 의사결정 로그
   function renderDecisions({ setModal, opportunities, decisions }) {
     return html`<div class="decision-layout">
       <section class="panel">
@@ -477,11 +483,11 @@
           ? html`<div class="decision-list">
               ${decisions.map(
                 (d) =>
-                  html`<article><div><span${attributes({ className: "decision-badge " + d.outcome })}>${d.autoDraft && d.outcome === "approved" ? "추진 제안" : getStageName(d.outcome)}${d.autoDraft ? " · 초안" : ""}</span><time>${formatDate(d.at, true)} KST</time></div><h3>${d.title}</h3><p>${d.rationale}</p>${d.conditions && html`<div class="conditions"><b>후속 조건</b> ${d.conditions}</div>`}<small>${getStageName(d.before)} → ${getStageName(d.outcome)} · 근거${" "}${d.evidenceIds?.length || 0}건</small>${d.autoDraft && html`<button class="secondary" ${attributes({ onClick: () => setModal({ type: "draft-decision", data: d }) })}>판단 초안 수정</button>`}</article>`,
+                  html`<article><div><span${attributes({ className: "decision-badge " + d.outcome })}>${d.autoDraft && d.outcome === "approved" ? "추진 제안" : getStageName(d.outcome)}${d.autoDraft ? " · 초안" : ""}</span><time>${formatDate(d.at, true)} KST</time></div><h3>${d.title}</h3><p>${d.rationale}</p>${d.conditions && html`<div class="conditions"><b>후속 조건</b> ${d.conditions}</div>`}<small>${getStageName(d.before)} → ${getStageName(d.outcome)} · 근거${" "}${d.evidenceIds?.length || 0}건</small>${d.autoDraft && html`<button class="secondary" ${attributes({ onClick: () => setModal({ type: "draft-decision", data: d }) })}>의사결정 로그 수정</button>`}</article>`,
               )}
             </div>`
           : renderEmptyState({
-              children: html`저장된 의사결정이 없습니다.<span
+              children: html`저장된 의사결정 로그가 없습니다.<span
                   >검토 안건에서 근거와 후속 조건을 입력해 결정해 보세요.</span
                 >`,
             })}
@@ -534,6 +540,92 @@
         </div>`,
     )}<div class="method-note">${ShieldCheck({ size: 16 })}<span>공식 출처라도 보도 내용의 실현 여부·성과·금액은 추가 확인해야 합니다.</span></div></aside></div>`;
   }
+  // 보고서 형식으로 안건을 보여주고 별도 버튼으로 편집합니다.
+  function renderOpportunityReport({
+    data,
+    signals,
+    assumptions,
+    decisions,
+    setModal,
+    openArticle,
+  }) {
+    const evidence = (data.evidenceIds || [])
+      .map((id) => signals.find((signal) => signal.id === id))
+      .filter(Boolean);
+    const score = investmentScore(data.scores || DEFAULT_SCORES);
+    const profile = [
+      ["해결할 문제", data.problem],
+      ["대상 고객", data.customer],
+      ["제공할 해결책", data.solution],
+      ["수익모델 가설", data.revenueModel],
+    ].filter(([, value]) => value);
+    return html`<div class="report-toolbar opportunity-report-toolbar">
+        <div>
+          <span class="status-tag ${data.userEdited ? "good" : "warning"}">
+            ${data.userEdited
+              ? "사용자 수정 반영"
+              : data.autoDraft
+                ? "자동 생성 초안"
+                : "검토 안건"}
+          </span>
+          <span class="muted">${formatDate(data.updatedAt || data.createdAt, true)} · ${evidence.length}건의 근거</span>
+        </div>
+        <button class="primary" ${attributes({ onClick: () => setModal({ type: "opportunity-edit", data }) })}>
+          수정
+        </button>
+      </div>
+      <article class="report-paper opportunity-report-paper">
+        <div class="report-paper-top">
+          <span>ORBITAL / BUSINESS REVIEW</span><b>사업·투자 검토 안건</b>
+        </div>
+        <h1>${data.title}</h1>
+        <div class="report-meta">
+          <span>${sectorOf(data.category).name} · 담당 ${data.owner || "미지정"}</span>
+          <span>검토 단계 ${getStageName(data.stage)}</span>
+        </div>
+        ${data.sample && html`<p class="report-footnote">검토 방식 설명을 위한 예시 안건입니다. 실제 투자 권고가 아닙니다.</p>`}
+        <section class="report-section">
+          <h2><span>01</span>검토 요약</h2>
+          <p>${data.thesis || "사업 가설이 입력되지 않았습니다."}</p>
+        </section>
+        <section class="report-section">
+          <h2><span>02</span>문제와 해결안</h2>
+          ${profile.length
+            ? html`<div class="opportunity-report-grid">${profile.map(([label, value]) => html`<div><span>${label}</span><p>${value}</p></div>`)}</div>`
+            : html`<p>세부 문제·고객·해결안은 아직 입력되지 않았습니다.</p>`}
+        </section>
+        <section class="report-section">
+          <h2><span>03</span>사업성 평가와 단계 제안</h2>
+          <div class="report-budget-total opportunity-score-summary">
+            <span>가중 평가 점수</span><b>${score}<small>/100</small></b>
+            <span>현재 단계</span><b>${getStageName(data.stage)}</b>
+          </div>
+          <div class="table-wrap"><table><thead><tr><th>평가 항목</th><th>가중치</th><th>점수</th></tr></thead><tbody>${SCORE_CRITERIA.map(({ id, label, weight }) => html`<tr><td>${label}</td><td>${Math.round(weight * 100)}%</td><td>${data.scores?.[id] || DEFAULT_SCORES[id]} / 5</td></tr>`)}</tbody></table></div>
+          ${data.autoDraft && html`<p class="report-footnote">자동 점수는 기사 빈도·출처 다양성·기술 및 계약 언급으로 산정한 초기 가설입니다. 고객 수요와 수익은 검증 전입니다.</p>`}
+        </section>
+        <section class="report-section">
+          <h2><span>04</span>수익모델·위험·다음 단계</h2>
+          <p><b>수익모델 가설</b><br />${data.revenueModel || "미입력"}</p>
+          <p><b>위험과 확인사항</b><br />${data.risks || "미입력"}</p>
+          <p><b>다음 검증 단계</b><br />${data.nextStep || "미입력"}</p>
+          <p><b>검토 투자액</b><br />${data.amount === null || data.amount === undefined || data.amount === "" ? "미확정" : `${Number(data.amount).toLocaleString()}억 원`}</p>
+        </section>
+        <section class="report-section">
+          <h2><span>05</span>의사결정 로그와 검증 지표</h2>
+          <p>의사결정 로그 ${decisions.length}건 · 검증 지표 ${assumptions.length}개 · 연결 근거 ${evidence.length}건</p>
+          ${assumptions.length && html`<div class="table-wrap"><table><thead><tr><th>검증 지표</th><th>목표</th><th>실적</th></tr></thead><tbody>${assumptions.map((item) => html`<tr><td>${item.title}</td><td>${item.target}${item.unit || ""}</td><td>${item.actual === null || item.actual === undefined ? "미확인" : `${item.actual}${item.unit || ""}`}</td></tr>`)}</tbody></table></div>`}
+          ${decisions.map((item) => html`<p><b>${getStageName(item.outcome)} · ${formatDate(item.at, true)}</b><br />${item.rationale}</p>`)}
+          ${!assumptions.length && !decisions.length && html`<p>연결된 검증 지표와 의사결정 로그가 없습니다.</p>`}
+        </section>
+        <section class="report-section">
+          <h2><span>06</span>근거 기사</h2>
+          ${evidence.length
+            ? html`<div class="report-evidence">${evidence.map((article) => html`<button${attributes({ onClick: () => openArticle?.(article) })}><span>${formatDate(article.publishedAt)} · ${article.source}</span><b>${article.titleKo || article.title}</b>${ArrowUpRight({ size: 14 })}</button>`)}</div>`
+            : html`<p>연결된 근거 기사가 없습니다.</p>`}
+          <p class="report-footnote">평가와 단계는 검토를 돕기 위한 초안입니다. 실제 투자 승인·집행은 담당자의 별도 검토와 결재가 필요합니다.</p>
+        </section>
+      </article>`;
+  }
   // 검토 안건 입력
   function renderOpportunityForm({
     data = {},
@@ -541,6 +633,7 @@
     assumptions = [],
     decisions = [],
     busy,
+    onCancel,
     onSave,
     onDecision,
     onDuplicate,
@@ -594,7 +687,7 @@
       html`<div class="feedback-box">
         <h4>검토·실적 피드백</h4>
         <p>
-          현재 단계 ${getStageName(data.stage)} · 결정 기록
+          현재 단계 ${getStageName(data.stage)} · 의사결정 로그
           ${decisions.length}건 · 가정 ${assumptions.length}건
         </p>
         ${assumptions.map(
@@ -758,7 +851,7 @@
                         ),
                     })}
                   /><span
-                    >${s.title}<small
+                    >${s.titleKo || s.title}<small
                       >${s.source} ·
                       ${s.reviewed ? "원문 확인 기록" : s.verification}</small
                     ></span
@@ -768,6 +861,9 @@
         </div>
       </div>
       <div class="modal-actions">
+        <button class="secondary" type="button" ${attributes({ disabled: busy, onClick: onCancel })}>
+          보고서 보기
+        </button>
         ${data.id &&
         html`<button
           class="secondary"
@@ -776,7 +872,7 @@
             onClick: onDecision,
           })}
         >
-          의사결정 기록 ${ArrowRight({ size: 14 })}
+          의사결정 로그 ${ArrowRight({ size: 14 })}
         </button>`}<button class="primary" ${attributes({ disabled: busy })}>
           ${busy
             ? Loader2({ size: 14, className: "spin" })
@@ -964,10 +1060,9 @@
             { id: "analysis", label: "사업영향·기회", to: "pipeline" },
             { id: "review", label: "투자검토", to: "pipeline" },
             { id: "decide", label: "의사결정", to: "decisions" },
-            { id: "feedback", label: "가정·실적", to: "performance" },
           ].map(
             (p, i) =>
-              html`<button${attributes({ onClick: () => setView(p.to) })}><span class="flow-number">0${i + 1}</span><b>${p.label}</b><span class="flow-count">${progressCount(p.id)}<small>건</small></span>${i < 6 && ChevronRight({ className: "flow-arrow", size: 13 })}</button>`,
+              html`<button${attributes({ onClick: () => setView(p.to) })}><span class="flow-number">0${i + 1}</span><b>${p.label}</b><span class="flow-count">${progressCount(p.id)}<small>건</small></span>${i < 5 && ChevronRight({ className: "flow-arrow", size: 13 })}</button>`,
           )}
         </div>
       </section>
@@ -1033,8 +1128,7 @@
             : {
                 knowledge: "관련 기사·지식베이스",
                 pipeline: "사업·투자 검토",
-                decisions: "의사결정 기록",
-                performance: "가정·실적 관리",
+                decisions: "의사결정 로그",
                 sources: "수집·업데이트",
                 reports: "사업·투자 검토",
               }[view]}
@@ -1049,8 +1143,6 @@
                   "기회 발굴 → 투자검토 → 실증 → 결정 · 점수는 내부 검토용 기준입니다.",
                 decisions:
                   "추진·보류·종료와 판단 근거를 기록하고 검토 이력을 추적합니다.",
-                performance:
-                  "목표와 실제 값을 연결해 다음 검토의 근거로 활용합니다.",
                 sources:
                   "공식 RSS와 분야별 뉴스 검색 피드를 수집하고, 중복 제거·분류 후 저장합니다.",
                 reports:
@@ -1074,16 +1166,7 @@
             >
               ${Plus({ size: 15 })} 검토 안건 등록
             </button>`
-          : view === "performance"
-            ? html`<button
-                class="primary"
-                ${attributes({
-                  onClick: () => setModal({ type: "assumption" }),
-                })}
-              >
-                ${Plus({ size: 15 })} 가정 등록
-              </button>`
-            : html`<button
+          : html`<button
                 class="secondary"
                 ${attributes({ onClick: refresh })}${attributes({
                   disabled: refreshing,
@@ -1294,7 +1377,7 @@
           failed: googleNews ? "Google News 분석 실패" : "원문 수집·요약 실패",
         }[s.articleJob?.status] ||
         (googleNews ? "Google News 제목" : "원문 제목");
-    return html`<button${attributes({ className: "news-card " + (compact ? "compact" : "") })}${attributes({ onClick: () => onOpen(s) })}><div class="news-card-top">${renderSectorChip({ id: s.category })}<span${attributes({ className: "source-status " + (s.reviewed ? "verified" : "") })}>${s.reviewed ? Check({ size: 10 }) : s.official ? ShieldCheck({ size: 10 }) : null}${s.reviewed ? "원문 확인 기록" : s.official ? "공식 출처" : "미검증"}</span><span class="news-formatDate">${s.kind === "reference" ? "기초 자료" : formatDate(s.publishedAt)}</span></div><h3>${s.title}</h3><div class="news-meta"><span>${s.source}</span><span>${s.kind === "reference" ? "서비스·기술 소개" : analysisLabel}${" "}${ArrowUpRight({ size: 11 })}</span></div></button>`;
+    return html`<button${attributes({ className: "news-card " + (compact ? "compact" : "") })}${attributes({ onClick: () => onOpen(s) })}><div class="news-card-top">${renderSectorChip({ id: s.category })}<span${attributes({ className: "source-status " + (s.reviewed ? "verified" : "") })}>${s.reviewed ? Check({ size: 10 }) : s.official ? ShieldCheck({ size: 10 }) : null}${s.reviewed ? "원문 확인 기록" : s.official ? "공식 출처" : "미검증"}</span><span class="news-formatDate">${s.kind === "reference" ? "기초 자료" : formatDate(s.publishedAt)}</span></div><h3>${s.titleKo || s.title}</h3><div class="news-meta"><span>${s.source}</span><span>${s.kind === "reference" ? "서비스·기술 소개" : analysisLabel}${" "}${ArrowUpRight({ size: 11 })}</span></div></button>`;
   }
   function renderSidebar({
     view,
@@ -1349,215 +1432,31 @@
       </div>
     </aside>`;
   }
-  function renderSignalDetail({
-    setView,
-    busy,
-    modal,
-    setModal,
-    opportunities,
-    performances,
-    save,
-    promote,
-    extractKeywords,
-  }) {
+  function renderSignalDetail({ modal }) {
     const googleNews = modal.data.url?.includes("news.google.com");
-    const bodyText =
-      modal.data.articleContent?.fullText ||
-      modal.data.articleAnalysis?.fullText;
-    const fullBodySummary =
-      modal.data.articleAnalysis?.analysisBasis === "article-body";
-    const headlineAnalysis =
-      modal.data.articleAnalysis?.analysisBasis === "google-news-headline";
-    const rssExcerpt =
-      modal.data.articleAnalysis?.analysisBasis === "rss-excerpt";
-    return html`<div class="signal-detail">
-      <div class="detail-badges">
-        ${renderSectorChip({ id: modal.data.category })}<span class="status-tag"
-          >${modal.data.verification}</span
-        >
-      </div>
-      <h2>${modal.data.title}</h2>
-      <div class="detail-source">
-        ${googleNews ? "Google News · " : ""}${modal.data.source} · 발행
-        ${formatDate(modal.data.publishedAt, true)}<br />수집
-        ${formatDate(modal.data.collectedAt, true)} KST
-      </div>
+    const summary =
+      modal.data.articleAnalysis?.summary ||
+      (!googleNews ? modal.data.summary : null) ||
+      "요약이 아직 준비되지 않았습니다.";
+    const originalUrl =
+      modal.data.articleContent?.resolvedUrl ||
+      modal.data.articleAnalysis?.resolvedUrl ||
+      modal.data.url;
+    return html`<div class="signal-detail article-summary-detail">
+      <h2>${modal.data.titleKo || modal.data.title}</h2>
       <a
         class="primary source-original"
-        ${attributes({
-          href:
-            modal.data.articleContent?.resolvedUrl ||
-            modal.data.articleAnalysis?.resolvedUrl ||
-            modal.data.url,
-        })}
+        ${attributes({ href: originalUrl })}
         target="_blank"
         rel="noopener noreferrer"
-        >${"기사 원문 열기"} ${ArrowUpRight({ size: 14 })}</a
+        >기사 원문 열기 ${ArrowUpRight({ size: 14 })}</a
       >
       <div class="detail-block">
-        <h4>
-          ${modal.data.articleAnalysis
-            ? headlineAnalysis
-              ? "한국어 요약 · Google News 제목 기반"
-              : rssExcerpt
-                ? "한국어 요약 · RSS 발췌 기반"
-                : "한국어 기사 요약"
-            : googleNews
-              ? "Google News 피드 · 분석 전"
-              : "피드 설명 · AI 요약 전"}
-        </h4>
-        <p>
-          ${(fullBodySummary ? modal.data.articleAnalysis?.summary : null) ||
-          "한국어 요약을 자동으로 준비하고 있습니다. 서버의 처리 상태가 아래에 표시됩니다."}
-        </p>
-      </div>
-      <div class="detail-block analysis-block">
-        <h4>
-          ${googleNews ? "Python 원문 수집·요약" : "Python 원문 수집·요약"} ·
-          GPT-6 Luna / Low
-        </h4>
-        <p>
-          ${{
-            "body-ready":
-              "Python 기사 본문 확보 완료 · 한국어 요약 대기 중입니다.",
-            pending: googleNews
-              ? "Python 수집기로 원문 주소와 기사 본문을 확보할 차례를 기다리고 있습니다."
-              : "서버에서 자동 분석을 기다리는 중입니다.",
-            running: googleNews
-              ? "Python으로 기사 본문을 추출하고 본문 전체를 한국어로 요약하고 있습니다."
-              : "서버가 원문을 수집하고 AI로 요약하는 중입니다.",
-            completed: headlineAnalysis
-              ? "Google News 제목·매체 정보를 분석했습니다. Google News 피드에는 기사 본문이 없어 세부 내용은 확인할 수 없습니다."
-              : rssExcerpt
-                ? "RSS에서 제공된 발췌문을 한국어로 요약해 DB에 저장했습니다."
-                : "원문 자동 수집과 AI 요약이 완료되어 DB에 저장됐습니다.",
-            failed:
-              "자동 분석 실패: " +
-              (modal.data.articleJob?.error || "원문 접근을 확인해 주세요."),
-          }[modal.data.articleJob?.status] ||
-          (googleNews
-            ? "원문 링크를 확인하고 Python으로 공개 기사 본문을 추출해 요약합니다."
-            : "뉴스 수집 시 서버가 원문을 자동 수집하고 요약합니다.")}
-        </p>
-        <button
-          class="primary"
-          ${attributes({
-            disabled:
-              busy ||
-              ["pending", "running"].includes(modal.data.articleJob?.status),
-            onClick: () => extractKeywords(modal.data.id),
-          })}
-        >
-          ${modal.data.articleJob?.status === "failed"
-            ? googleNews
-              ? "본문 수집·요약 재시도"
-              : "원문 수집·요약 재시도"
-            : googleNews
-              ? "본문 수집·요약 다시 실행"
-              : "원문 수집·요약 다시 실행"}
-        </button>
-        ${modal.data.articleAnalysis &&
-        html`<div class="entity-tags">
-            ${modal.data.articleAnalysis.keywords.map(
-              (keyword) => html`<span>${keyword}</span>`,
-            )}
-          </div>
-          <p class="muted">
-            ${modal.data.articleAnalysis.model} ·
-            ${modal.data.articleAnalysis.effort} ·
-            ${formatDate(modal.data.articleAnalysis.analyzedAt, true)}
-          </p>
-          ${bodyText &&
-          html`<details>
-            <summary>
-              ${headlineAnalysis
-                ? "분석에 사용한 Google News 정보 보기"
-                : "수집한 원문 본문 보기"}
-            </summary>
-            <p style="white-space:pre-wrap">${bodyText}</p>
-          </details>`}`}
-      </div>
-      <div class="detail-block analysis-block">
-        <span class="analysis-label">검토용 사업 가설 · 규칙 기반</span>
-        <h4>${sectorOf(modal.data.category).question}</h4>
-        <p>${modal.data.implication}</p>
-        <span class="affiliate"
-          >한화 사업 접점(제안): ${modal.data.affiliate}</span
-        >
-      </div>
-      <div class="detail-block uncertainty-block">
-        ${AlertCircle({ size: 15 })}
-        <p>${modal.data.uncertainty}</p>
-      </div>
-      <div class="entity-tags">
-        ${(modal.data.entities || []).map((t) => html`<span>${t}</span>`)}
-      </div>
-      ${opportunities.some((o) => o.evidenceIds?.includes(modal.data.id)) &&
-      html`<div class="feedback-box">
-        <h4>지식베이스로 돌아온 검토·실적</h4>
-        ${opportunities
-          .filter((o) => o.evidenceIds?.includes(modal.data.id))
-          .map(
-            (o) =>
-              html`<div>
-                <span>${o.title}</span
-                ><b
-                  >${getStageName(o.stage)} ·
-                  실적${" "}${performances.filter(
-                    (p) => p.opportunityId === o.id,
-                  ).length}건</b
-                >
-              </div>`,
-          )}<button
-          class="text-btn"
-          ${attributes({
-            onClick: () => {
-              setModal(null);
-              setView("performance");
-            },
-          })}
-        >
-          가정·실적 관리로 이동 ${ArrowRight({ size: 12 })}
-        </button>
-      </div>`}
-      <form
-        class="verification-form"
-        ${attributes({
-          onSubmit: async (e) => {
-            e.preventDefault();
-            const f = new FormData(e.currentTarget);
-            await save("verify", {
-              id: modal.data.id,
-              note: f.get("note"),
-            });
-          },
-        })}
-      >
-        <h4>원문 확인 기록</h4>
-        ${modal.data.reviewed &&
-        html`<p class="muted">
-          기록된 확인 내용: ${modal.data.reviewNote}
-        </p>`}<textarea
-          name="note"
-          required
-          placeholder="확인한 사실과 아직 확인되지 않은 내용을 적어 주세요."
-          ${attributes({ rows: 2 })}
-        ></textarea
-        ><button class="secondary" ${attributes({ disabled: busy })}>
-          ${ShieldCheck({ size: 13 })} 원문 확인 기록 저장
-        </button>
-      </form>
-      <div class="modal-actions">
-        <button
-          class="primary"
-          ${attributes({ onClick: () => promote(modal.data) })}
-        >
-          이 신호로 투자검토 안건 만들기 ${ArrowRight({ size: 14 })}
-        </button>
+        <h4>요약</h4>
+        <p>${summary}</p>
       </div>
     </div>`;
-  }
-  // 뉴스 수집 상태
+  }  // 뉴스 수집 상태
   function renderSources({ state, refreshing, lastRun, schedule, refresh }) {
     return html`<div class="sources-top"><section class="panel schedule-card"><span class="eyebrow">HOURLY INTELLIGENCE</span><h2>${
       schedule?.enabled

@@ -28,6 +28,7 @@ const { contentFor, failContent } = require("./article-content");
 const { now, uid, json } = require("./utils");
 const { runStructured } = require("./codex");
 const { validateKeywords } = require("./keywords");
+const { translateKeywordLabels } = require("./headline-translations");
 const { text, required } = require("./validation");
 const running = new Map();
 function recordQuery(id, kind, data, timestamp = now()) {
@@ -233,8 +234,24 @@ async function runDiscovery(id, { fetcher = getFeed } = {}) {
       "서버 자동 수집",
     ),
   ]);
+  const recommendation = recommend(filtered, scope);
+  try {
+    const labels = await translateKeywordLabels(
+      recommendation.keywords.map((keyword) => keyword.word),
+    );
+    recommendation.keywords = recommendation.keywords.map((keyword) => ({
+      ...keyword,
+      labelKo: labels.get(keyword.word) || keyword.word,
+    }));
+  } catch (error) {
+    console.warn("[ORBITAL translation] keyword labels:", error.message);
+    recommendation.keywords = recommendation.keywords.map((keyword) => ({
+      ...keyword,
+      labelKo: keyword.word,
+    }));
+  }
   const data = {
-    ...recommend(filtered, scope),
+    ...recommendation,
     added,
     details,
     countryCounts: countryCounts(filtered).map(({ code, name, count }) => ({
