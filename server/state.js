@@ -3,6 +3,7 @@ const { investmentScore, sectorOf, sourceFeeds } = require("../js/config");
 const { db, rowData } = require("./database");
 const { analysis } = require("./signals");
 const { json, now } = require("./utils");
+const { enrich } = require("../js/research-core");
 async function initialize() {
   const seeds = [
     [
@@ -123,7 +124,7 @@ async function getState() {
   const [sig, rec, logs, runs] = await Promise.all([
     db()
       .prepare(
-        "SELECT s.* FROM signals s WHERE s.id IN (SELECT id FROM signals ORDER BY collected_at DESC LIMIT 140) OR s.id LIKE 'reference-%' OR EXISTS (SELECT 1 FROM records r, json_each(r.data, '$.evidenceIds') e WHERE r.kind='opportunity' AND e.value=s.id) ORDER BY s.collected_at DESC LIMIT 500",
+        "SELECT s.* FROM signals s WHERE json_extract(s.data,'$.lastSeenAt') IS NOT NULL OR s.id LIKE 'reference-%' OR EXISTS (SELECT 1 FROM records r, json_each(r.data, '$.evidenceIds') e WHERE r.kind='opportunity' AND e.value=s.id) ORDER BY COALESCE(json_extract(s.data,'$.lastSeenAt'),s.collected_at) DESC LIMIT 500",
       )
       .all(),
     db()
@@ -136,7 +137,37 @@ async function getState() {
       .all(),
   ]);
   return {
-    signals: sig.results.map((r) => JSON.parse(r.data)),
+    signals: (
+      await Promise.all(
+        sig.results.map(async (r) => {
+          const job = await db()
+            .prepare(
+              "SELECT status,error,updated_at FROM article_jobs WHERE signal_id=?",
+            )
+            .bind(r.id)
+            .first();
+          const signal = enrich(JSON.parse(r.data));
+          if (signal.articleAnalysis) {
+            signal.articleAnalysis = { ...signal.articleAnalysis };
+            delete signal.articleAnalysis.fullText;
+          }
+          if (signal.keywordAnalysis) {
+            signal.keywordAnalysis = { ...signal.keywordAnalysis };
+            delete signal.keywordAnalysis.fullText;
+          }
+          delete signal.feedExcerpt;
+          if (signal.articleContent) {
+            signal.articleContent = {
+              ...signal.articleContent,
+              textLength: signal.articleContent.fullText?.length || 0,
+            };
+            delete signal.articleContent.fullText;
+          }
+          delete signal.previousArticleAnalysis;
+          return { ...signal, articleJob: job || null };
+        }),
+      )
+    ).filter((signal) => signal.articleJob?.status !== "failed"),
     records: rec.results.map(rowData),
     audit: logs.results,
     runs: runs.results.map((r) => ({

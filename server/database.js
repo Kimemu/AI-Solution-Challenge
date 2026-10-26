@@ -40,19 +40,65 @@ async function insertSignals(signals) {
   });
   let added = 0;
   for (let offset = 0; offset < unique.length; offset += SIGNAL_BATCH_SIZE) {
-    const results = await db().batch(
-      unique
-        .slice(offset, offset + SIGNAL_BATCH_SIZE)
-        .map((signal) =>
-          db()
+    const chunk = unique.slice(offset, offset + SIGNAL_BATCH_SIZE);
+    const placeholders = chunk.map(() => "?").join(",");
+    const existingRows = await db()
+      .prepare(`SELECT id,data FROM signals WHERE id IN (${placeholders})`)
+      .bind(...chunk.map((signal) => signal.id))
+      .all();
+    const existing = new Map(
+      existingRows.results.map((row) => [row.id, row.data]),
+    );
+    const operations = chunk.map((signal) => {
+      const previous = existing.get(signal.id);
+      if (!previous)
+        return {
+          insert: true,
+          query: db()
             .prepare(
               "INSERT OR IGNORE INTO signals (id,url,data,collected_at) VALUES (?,?,?,?)",
             )
-            .bind(signal.id, signal.url, json(signal), signal.collectedAt),
-        ),
-    );
+            .bind(
+              signal.id,
+              signal.url,
+              json({ ...signal, lastSeenAt: signal.collectedAt }),
+              signal.collectedAt,
+            ),
+        };
+      const current = JSON.parse(previous);
+      const refreshed = {
+        ...current,
+        title: signal.title,
+        source: signal.source,
+        feed: signal.feed,
+        official: signal.official,
+        category: signal.category,
+        publishedAt: signal.publishedAt || current.publishedAt,
+        verification: signal.verification,
+        entities: signal.entities,
+        signalType: signal.signalType,
+        lastSeenAt: signal.collectedAt,
+        publisherDomain: signal.publisherDomain || current.publisherDomain,
+        countryCodes: signal.countryCodes?.length
+          ? signal.countryCodes
+          : current.countryCodes,
+        countryBasis: signal.countryCodes?.length
+          ? signal.countryBasis
+          : current.countryBasis,
+        countryVersion: signal.countryVersion || current.countryVersion,
+      };
+      if (!current.articleAnalysis) refreshed.summary = signal.summary;
+      return {
+        insert: false,
+        query: db()
+          .prepare("UPDATE signals SET url=?,data=? WHERE id=?")
+          .bind(signal.url, json(refreshed), signal.id),
+      };
+    });
+    const results = await db().batch(operations.map(({ query }) => query));
     added += results.reduce(
-      (count, result) => count + Number(result.meta.changes || 0),
+      (count, result, index) =>
+        count + Number(operations[index].insert && result.meta.changes > 0),
       0,
     );
   }

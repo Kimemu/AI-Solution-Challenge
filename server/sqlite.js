@@ -43,7 +43,7 @@ function getConnection() {
   connection.exec("PRAGMA journal_mode=WAL;");
   connection.exec(fs.readFileSync(path.join(__dirname, "schema.sql"), "utf8"));
   if (
-    process.env.ORBITAL_SEED_NEWS !== "0" &&
+    process.env.ORBITAL_SEED_NEWS === "1" &&
     connection.prepare("SELECT count(*) AS count FROM signals").get().count ===
       0
   ) {

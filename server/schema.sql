@@ -32,3 +32,19 @@ CREATE TABLE IF NOT EXISTS `signals` (
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX IF NOT EXISTS `signals_url_unique` ON `signals` (`url`);
+CREATE TABLE IF NOT EXISTS article_jobs (
+  signal_id TEXT PRIMARY KEY NOT NULL,
+  status TEXT NOT NULL,
+  error TEXT,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS research_jobs (
+  id TEXT PRIMARY KEY NOT NULL,
+  kind TEXT NOT NULL,
+  status TEXT NOT NULL,
+  phase TEXT NOT NULL,
+  data TEXT NOT NULL,
+  error TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);

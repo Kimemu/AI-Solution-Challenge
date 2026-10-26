@@ -2,6 +2,7 @@
 const { sectorOf, sourceFeeds } = require("../js/config");
 const { now } = require("./utils");
 const { safeUrl, text } = require("./validation");
+const { enrich } = require("../js/research-core");
 function analysis(category) {
   const s = sectorOf(category);
   return {
@@ -35,13 +36,25 @@ function tag(block, name) {
 }
 function classify(title, fallback) {
   const s = title.toLowerCase();
-  if (/methane|emission|carbon capture/.test(s)) return "emissions";
-  if (/maritime|ship|port |vessel|ocean security/.test(s)) return "maritime";
-  if (/photovoltaic|qcells|solar power|irradiance|renewable/.test(s))
+  if (
+    /methane|emission|greenhouse gas|carbon capture|메탄|탄소|배출|climate/.test(
+      s,
+    )
+  )
+    return "emissions";
+  if (
+    /maritime|shipping|\bports?\b|vessel|ocean security|해양|항만|선박/.test(s)
+  )
+    return "maritime";
+  if (
+    /photovoltaic|qcells|solar|irradiance|renewable|energy|battery|태양광|에너지|배터리/.test(
+      s,
+    )
+  )
     return "solar";
   if (/insar|subsidence|ground motion|infrastructure/.test(s))
     return "infrastructure";
-  if (/crop|agricultur|soil moisture|food security/.test(s))
+  if (/crop|agricultur|soil moisture|food security|farmer|농업|작황/.test(s))
     return "agriculture";
   return sectorOf(fallback).id;
 }
@@ -77,28 +90,46 @@ async function hash(s) {
     .map((x) => x.toString(16).padStart(2, "0"))
     .join("");
 }
-const MAX_ITEMS_PER_SOURCE = 8;
+// Google News RSS feed result counts vary by category. Keep a practical ceiling
+// while allowing current RSS results to determine the number actually stored.
+const MAX_ITEMS_PER_SOURCE = 20;
 async function normalizeSignal(feed, raw, includeSummaryEntities = false) {
   const title = text(raw.title, 350);
   const url = safeUrl(raw.url);
   if (!title || !url) return null;
+  const publisherDomain = safeUrl(raw.sourceUrl)
+    ? new URL(raw.sourceUrl).hostname.replace(/^www\./, "")
+    : feed.official
+      ? new URL(feed.url).hostname.replace(/^www\./, "")
+      : "";
+  if (
+    feed.outlets &&
+    !feed.outlets.some(
+      (outlet) =>
+        publisherDomain === outlet.domain ||
+        publisherDomain.endsWith("." + outlet.domain),
+    )
+  )
+    return null;
   const published = Date.parse(text(raw.publishedAt));
   if (Number.isFinite(published) && published > Date.now() + 86400000)
     return null;
   const category = classify(title, feed.category);
   const summary = feed.official
     ? text(raw.summary, 330)
-    : "검색 피드에서 수집한 제목입니다. 기사 본문과 계약·금액·일정은 원문에서 추가 확인이 필요합니다.";
-  return {
+    : "Google News 피드에는 제목·매체·링크만 포함되어 있습니다. 기사 세부 내용은 제공되지 않습니다.";
+  return enrich({
     id: await hash(url),
     title,
     url,
     source: text(raw.source, 160) || feed.name,
     feed: feed.id,
+    publisherDomain,
     official: feed.official,
     kind: "news",
     category,
     summary,
+    ...(feed.official ? { feedExcerpt: text(raw.summary, 8000) } : {}),
     publishedAt: Number.isFinite(published)
       ? new Date(published).toISOString()
       : null,
@@ -113,7 +144,7 @@ async function normalizeSignal(feed, raw, includeSummaryEntities = false) {
         ? "계약·투자"
         : "기술·시장",
     ...analysis(category),
-  };
+  });
 }
 async function getFeed(feed) {
   const response = await fetch(feed.url, {
@@ -139,6 +170,9 @@ async function getFeed(feed) {
           publishedAt: tag(block, "pubDate"),
           summary: tag(block, "description"),
           source: tag(block, "source"),
+          sourceUrl: decode(
+            (block.match(/<source\s[^>]*url=["']([^"']+)["']/i) || [])[1] || "",
+          ),
         },
         true,
       ),

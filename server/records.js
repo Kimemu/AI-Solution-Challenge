@@ -13,6 +13,12 @@ const {
 function normalize(kind, input, previous) {
   const data = { ...previous, ...asObject(input) };
   delete data.revision;
+  if (previous?.researchId) {
+    data.researchId = previous.researchId;
+    data.autoDraft = previous.autoDraft;
+    data.id = previous.id;
+    data.userEdited = true;
+  }
   if (kind === "opportunity") {
     const existingRecord =
       previous?.kind === "opportunity" ? previous : undefined;
@@ -20,20 +26,50 @@ function normalize(kind, input, previous) {
     if (amount !== null && amount < 0)
       throw new Error("검토 투자액은 0 이상이어야 합니다.");
     const normalizedScores = scores(data.scores);
+    const score = investmentScore(normalizedScores);
+    let stage = existingRecord?.stage || "watch";
+    const gateThresholds =
+      previous?.gateThresholds || require("../js/research-config").gates;
+    if (previous?.autoDraft) {
+      stage =
+        data.manualStage === true
+          ? [
+              "watch",
+              "diligence",
+              "pilot",
+              "approved",
+              "hold",
+              "rejected",
+            ].includes(data.stage)
+            ? data.stage
+            : previous.stage
+          : require("../js/research-core").stageFor(score, gateThresholds);
+    }
     return {
       ...data,
       title: required(data.title, "안건명", 160),
       category: sectorOf(text(data.category)).id,
       thesis: required(data.thesis, "사업 가설", 3000),
       scores: normalizedScores,
-      score: investmentScore(normalizedScores),
+      score,
       amount,
       owner: text(data.owner, 80) || "미지정",
       nextStep: text(data.nextStep, 1000),
       evidenceIds: Array.isArray(data.evidenceIds)
         ? data.evidenceIds.filter((id) => typeof id === "string").slice(0, 20)
         : [],
-      stage: existingRecord?.stage || "watch",
+      stage,
+      ...(previous?.autoDraft
+        ? {
+            gateTrace: Object.entries(gateThresholds).map(
+              ([stage, threshold]) => ({
+                stage,
+                threshold,
+                passed: score >= threshold,
+              }),
+            ),
+          }
+        : {}),
       sample: !!existingRecord?.sample,
     };
   }
@@ -50,6 +86,56 @@ function normalize(kind, input, previous) {
       direction: data.direction === "lower" ? "lower" : "higher",
       actual: existingRecord?.actual ?? null,
       note: text(data.note, 2000),
+    };
+  }
+  if (kind === "decision" && previous?.autoDraft) {
+    if (
+      !["watch", "diligence", "pilot", "approved", "hold", "rejected"].includes(
+        data.outcome,
+      )
+    )
+      throw new Error("검토 제안 단계를 선택해 주세요.");
+    return {
+      ...data,
+      title: previous.title,
+      rationale: required(data.rationale, "판단 근거", 4000),
+      conditions: text(data.conditions, 2000),
+    };
+  }
+  if (kind === "report" && previous?.researchId) {
+    const fields = Object.fromEntries(
+      [
+        "title",
+        "author",
+        "department",
+        "reviewer",
+        "approver",
+        "executive",
+        "strategic",
+        "economic",
+        "commercial",
+        "management",
+        "risks",
+        "request",
+      ].map((key) => [key, text(data[key], key === "title" ? 200 : 8000)]),
+    );
+    if (!fields.title || !fields.request)
+      throw new Error("보고서 제목과 결재 요청사항이 필요합니다.");
+    const budget = require("./research-logic").budgetOf(data.budget);
+    const focus = db()
+      .prepare("SELECT data FROM records WHERE id=? AND kind='opportunity'")
+      .bind(data.focusOpportunityId)
+      .first();
+    if (
+      (!focus && data.focusOpportunityId) ||
+      (focus && JSON.parse(focus.data).researchId !== previous.researchId)
+    )
+      throw new Error("이 분석에 속한 기준 안건을 선택해 주세요.");
+    return {
+      ...data,
+      ...fields,
+      budget,
+      status: data.focusOpportunityId ? "draft" : "insufficient-evidence",
     };
   }
   throw new Error("지원하지 않는 기록 형식입니다.");
@@ -82,8 +168,8 @@ async function updateRecord(id, body, actor) {
   if (existingRecord.revision !== body.revision)
     throw new Error("CONFLICT:다른 화면에서 수정됐습니다. 다시 불러와 주세요.");
   if (
-    existingRecord.kind !== "opportunity" &&
-    existingRecord.kind !== "assumption"
+    !["opportunity", "assumption", "report"].includes(existingRecord.kind) &&
+    !(existingRecord.kind === "decision" && existingRecord.autoDraft)
   )
     throw new Error("지원하지 않는 기록 형식입니다.");
   const normalized = normalize(existingRecord.kind, body.data, existingRecord);
@@ -97,6 +183,10 @@ async function updateRecord(id, body, actor) {
   if (!result.meta.changes)
     throw new Error("CONFLICT:최신 기록을 다시 불러와 주세요.");
   await log("검토 내용 수정", id, normalized.title, actor).run();
+  require("./research").syncGeneratedRecord({
+    ...normalized,
+    kind: existingRecord.kind,
+  });
   return {
     ...normalized,
     revision: existingRecord.revision + 1,

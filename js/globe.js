@@ -38,9 +38,10 @@
       this.status = this.scene.querySelector(".globe-status");
       this.updatePlayButton();
       const holder = this.scene.querySelector(".globe-markers");
-      this.markers = locations.map((location) => {
+      this.locations = model.globeLocations || [];
+      this.markers = this.locations.map((location) => {
         const button = document.createElement("button");
-        button.className = "globe-marker";
+        button.className = "globe-marker has-articles";
         button.hidden = true;
         button.setAttribute("aria-label", location.name + " 거점 선택");
         button.setAttribute(
@@ -56,9 +57,7 @@
         const title = document.createElement("strong");
         title.textContent = location.name;
         const subtitle = document.createElement("small");
-        subtitle.textContent = location.sector
-          ? `${model.counts[location.sector] || 0}건 · 분야 신호`
-          : "거점 탐색";
+        subtitle.textContent = `관련 기사 ${location.count}건`;
         label.append(title, subtitle);
         button.append(dot, label);
         holder.append(button);
@@ -77,7 +76,7 @@
         const clear = document.createElement("button");
         clear.className = "globe-country-selection";
         clear.textContent =
-          (locations.find((item) => item.country === model.selectedCountry)
+          (this.locations.find((item) => item.country === model.selectedCountry)
             ?.name || model.selectedCountry) + " ×";
         clear.setAttribute("aria-label", "선택 국가 해제");
         clear.onclick = () => model.setSelectedCountry(null);
@@ -230,7 +229,10 @@
             window.OrbitalEarth.countries.find((item) =>
               item.rings.some((ring) => ringContains(geo.lon, geo.lat, ring)),
             );
-          if (country)
+          if (
+            country &&
+            this.locations.some((location) => location.country === country.name)
+          )
             this.model.setSelectedCountry(
               this.model.selectedCountry === country.name ? null : country.name,
             );
@@ -337,7 +339,7 @@
       const placed = [];
       let count = 0;
       const view = this.view;
-      const points = locations.map((location, index) => ({
+      const points = this.locations.map((location, index) => ({
         location,
         index,
         ...projectPoint(location.lon, location.lat, view),

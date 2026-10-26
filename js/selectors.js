@@ -1,17 +1,27 @@
 // 화면 집계·검색: 서버 요청이나 화면 수정을 하지 않는 순수 함수입니다.
 (function () {
   const { sectors } = window.OrbitalConfig;
-  function selectDashboard(state, sector, query, newsMode) {
+  function selectDashboard(state, sector, query, newsMode, researchId) {
     const records = state?.records ?? [];
     const signals = state?.signals ?? [];
-    const opportunities = records.filter(
-      (record) => record.kind === "opportunity",
+    const scoped = records.filter(
+      (record) => !researchId || record.researchId === researchId,
     );
-    const assumptions = records.filter(
-      (record) => record.kind === "assumption",
+    const opportunities = scoped.filter(
+      (record) =>
+        record.kind === "opportunity" &&
+        !record.sample &&
+        (!record.excluded || record.userEdited),
     );
-    const decisions = records.filter((record) => record.kind === "decision");
-    const performances = records.filter(
+    const assumptions = scoped.filter(
+      (record) =>
+        record.kind === "assumption" && (!record.excluded || record.userEdited),
+    );
+    const decisions = scoped.filter(
+      (record) =>
+        record.kind === "decision" && (!record.excluded || record.userEdited),
+    );
+    const performances = scoped.filter(
       (record) => record.kind === "performance",
     );
     const news = [...signals].sort((a, b) =>
@@ -24,7 +34,7 @@
       (signal) =>
         (sector === "all" || signal.category === sector) &&
         (!needle ||
-          `${signal.title} ${signal.summary} ${signal.source} ${signal.entities.join(" ")}`
+          `${signal.title} ${signal.summary} ${signal.source} ${(signal.entities || []).join(" ")}`
             .toLowerCase()
             .includes(needle)) &&
         (newsMode === "all" ||

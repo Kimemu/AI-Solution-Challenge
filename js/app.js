@@ -1,7 +1,7 @@
 /** 상태 변경과 서버 요청을 관리합니다. 화면 HTML은 views.js에 있습니다. */
 (function () {
   const { sectorOf } = window.OrbitalConfig;
-  const apiBase = location.protocol === "file:" ? "http://127.0.0.1:8001" : "";
+  const apiBase = location.protocol === "file:" ? "http://127.0.0.1:37214" : "";
   const ui = {
     view: "overview",
     sector: "all",
@@ -16,7 +16,7 @@
     connected: false,
   };
   const state = {
-    signals: window.OrbitalNews,
+    signals: [],
     records: [],
     audit: [],
     runs: [],
@@ -30,6 +30,20 @@
   let draftIndex = 0;
   let requestId = 0;
   let renderedModalKey = "";
+  let pendingGlobeFocus;
+  const research = window.OrbitalResearchController.create({
+    request,
+    state,
+    ui,
+    render,
+    notify,
+    load,
+    setModal,
+    apiBase,
+    focusGlobe(country) {
+      pendingGlobeFocus = country;
+    },
+  });
 
   async function request(path, method = "GET", body) {
     const response = await fetch(apiBase + "/api/" + path, {
@@ -55,14 +69,28 @@
       const result = await request("state");
       if (current !== requestId) return;
       Object.assign(state, result);
+      if (ui.modal?.type === "signal") {
+        const id = ui.modal.data.id;
+        try {
+          const latest = await request("signals/" + encodeURIComponent(id));
+          if (ui.modal?.type === "signal" && ui.modal.data.id === id) {
+            if (latest.articleJob?.status === "failed") {
+              ui.modal = null;
+              notify("요약에 실패한 기사를 목록에서 제외했습니다.");
+            } else ui.modal.data = latest;
+          }
+        } catch {
+          /* 목록은 연결된 서버의 응답으로 유지합니다. */
+        }
+      }
       ui.connected = true;
       ui.error = "";
       render();
+      void research.afterLoad().catch((error) => notify(error.message));
     } catch {
       if (current !== requestId) return;
       ui.connected = false;
-      ui.error =
-        "저장된 뉴스로 화면을 미리 보는 중입니다. 실제 수집·저장은 start.cmd를 실행한 뒤 사용할 수 있습니다.";
+      ui.error = "서버에 연결되지 않았습니다. start.cmd를 실행해 주세요.";
       render();
     }
   }
@@ -84,12 +112,17 @@
   function setView(view) {
     ui.view = view;
     render();
+    window.scrollTo(0, 0);
   }
   function setSector(sector) {
     ui.sector = sector;
     render();
   }
   function setSelectedCountry(country) {
+    if (country)
+      pendingGlobeFocus = window.OrbitalResearchConfig.countries.find(
+        (item) => item.mapName === country,
+      );
     ui.selectedCountry = country;
     render();
   }
@@ -102,26 +135,7 @@
     render();
   }
   async function refresh() {
-    if (!ui.connected) {
-      notify("start.cmd를 실행해 백엔드를 먼저 연결해 주세요.");
-      return;
-    }
-    ui.refreshing = true;
-    render();
-    try {
-      const result = await request("refresh", "POST");
-      await load();
-      notify(
-        result.throttled
-          ? result.message
-          : `신규 ${result.added}건 수집 · ${result.status === "success" ? "모든 피드 정상" : result.status === "partial" ? "일부 피드 연결 확인 필요" : "수집 실패"}`,
-      );
-    } catch (error) {
-      notify(error.message);
-    } finally {
-      ui.refreshing = false;
-      render();
-    }
+    return research.model().discoverKeywords();
   }
   async function save(path, body, method = "POST") {
     if (!ui.connected) {
@@ -175,11 +189,27 @@
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
   function getModel() {
+    const seen = new Set();
+    const contextSignals = [
+      ...(research.data.result?.articles || []),
+      ...state.signals,
+    ].filter((signal) => {
+      if (seen.has(signal.id)) return false;
+      seen.add(signal.id);
+      return true;
+    });
     return {
       ...ui,
       state,
       loading: false,
-      ...window.OrbitalSelect(state, ui.sector, ui.query, ui.newsMode),
+      ...window.OrbitalSelect(
+        { ...state, signals: contextSignals },
+        ui.sector,
+        ui.query,
+        ui.newsMode,
+        research.data.activeId,
+      ),
+      ...research.model(),
       setView,
       setSector,
       setSelectedCountry,
@@ -191,11 +221,29 @@
       save,
       promote,
       download,
+      extractKeywords,
       switchView(view) {
         ui.query = "";
         setView(view);
       },
     };
+  }
+  async function extractKeywords(id) {
+    if (ui.busy) return;
+    ui.busy = true;
+    render();
+    try {
+      await request("article-analysis", "POST", { id });
+      await load();
+      const signal = state.signals.find((item) => item.id === id);
+      if (ui.modal?.type === "signal" && signal) ui.modal.data = signal;
+      notify("자동 원문 수집·요약 대기열에 등록했습니다.");
+    } catch (error) {
+      notify(error.message);
+    } finally {
+      ui.busy = false;
+      render();
+    }
   }
   function draftState(initial) {
     const index = draftIndex++;
@@ -220,7 +268,12 @@
         .querySelectorAll(
           ".modal input[name], .modal select[name], .modal textarea[name]",
         )
-        .forEach((field) => formValues.set(field.name, field.value));
+        .forEach((field) =>
+          formValues.set(field.name, {
+            value: field.value,
+            checked: field.checked,
+          }),
+        );
     }
     const active = document.activeElement;
     const focusKey =
@@ -231,6 +284,15 @@
       savedGlobeView = { ...globe.view, playing: globe.playing };
       globe.destroy();
       globe = null;
+    }
+    if (pendingGlobeFocus) {
+      savedGlobeView = {
+        ...savedGlobeView,
+        yaw: -pendingGlobeFocus.lon,
+        tilt: Math.max(-55, Math.min(60, pendingGlobeFocus.lat)),
+        playing: false,
+      };
+      pendingGlobeFocus = null;
     }
     window.OrbitalUI.beginRender();
     draftIndex = 0;
@@ -244,8 +306,11 @@
         ".modal input[name], .modal select[name], .modal textarea[name]",
       )
       .forEach((field) => {
-        if (formValues.has(field.name))
-          field.value = formValues.get(field.name);
+        if (formValues.has(field.name)) {
+          field.value = formValues.get(field.name).value;
+          if (field.type === "checkbox")
+            field.checked = formValues.get(field.name).checked;
+        }
       });
     renderedModalKey = modalKey;
     if (document.getElementById("globe-root"))
@@ -273,16 +338,14 @@
     if (event.key === "Escape" && !ui.busy) setModal(null);
   });
   function selectLocation(location) {
-    ui.selectedCountry =
-      ui.selectedCountry === location.country ? null : location.country;
-    if (location.sector)
-      ui.sector = ui.sector === location.sector ? "all" : location.sector;
-    render();
+    setSelectedCountry(
+      ui.selectedCountry === location.country ? null : location.country,
+    );
   }
   window.OrbitalApp = { getModel, draftState, notify, render, selectLocation };
   render();
   void load();
   setInterval(() => {
-    if (!ui.modal && !ui.busy) void load();
-  }, 60000);
+    if ((!ui.modal || ui.modal.type === "signal") && !ui.busy) void load();
+  }, 10000);
 })();

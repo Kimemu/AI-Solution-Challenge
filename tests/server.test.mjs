@@ -10,9 +10,10 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "orbital-test-"));
 process.env.ORBITAL_DATABASE = path.join(temporary, "test.sqlite");
-process.env.ORBITAL_SEED_NEWS = "0";
+delete process.env.ORBITAL_SEED_NEWS;
 const { server } = require("../server.js");
 const { closeDatabase } = require("../server/sqlite.js");
+const { db } = require("../server/database.js");
 
 test("the dependency-free server serves HTML, protects internal files and supports file-origin API calls", async (t) => {
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -43,10 +44,34 @@ test("the dependency-free server serves HTML, protects internal files and suppor
   assert.equal(response.status, 404);
   response = await fetch(base + "/.git/config");
   assert.equal(response.status, 404);
+  response = await fetch(base + "/api/update-manifest");
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).maxItemsPerSource, 20);
   response = await fetch(base + "/api/state", { headers: { Origin: "null" } });
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("access-control-allow-origin"), "null");
   assert.equal((await response.json()).signals.length, 6);
+  const now = new Date().toISOString();
+  for (const signal of [
+    { id: "test-live", url: "https://example.test/live", lastSeenAt: now },
+    { id: "test-stale", url: "https://example.test/stale" },
+    { id: "test-failed", url: "https://example.test/failed", lastSeenAt: now },
+  ]) {
+    db()
+      .prepare("INSERT INTO signals (id,url,data,collected_at) VALUES (?,?,?,?)")
+      .bind(signal.id, signal.url, JSON.stringify({ ...signal, kind: "news" }), now)
+      .run();
+  }
+  db()
+    .prepare(
+      "INSERT INTO article_jobs (signal_id,status,error,updated_at) VALUES (?,?,?,?)",
+    )
+    .bind("test-failed", "failed", "원문 접근 차단", now)
+    .run();
+  const visibleSignals = (await (await fetch(base + "/api/state")).json()).signals;
+  assert.ok(visibleSignals.some((signal) => signal.id === "test-live"));
+  assert.ok(!visibleSignals.some((signal) => signal.id === "test-stale"));
+  assert.ok(!visibleSignals.some((signal) => signal.id === "test-failed"));
   response = await fetch(base + "/api/records", {
     method: "OPTIONS",
     headers: { Origin: "null", "Access-Control-Request-Method": "POST" },

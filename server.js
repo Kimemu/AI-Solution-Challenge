@@ -4,9 +4,24 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 const { networkInterfaces } = require("node:os");
 const { handleApi } = require("./server/api");
-const port = Number(process.env.PORT || 8001);
-const hostname = process.env.HOST || "127.0.0.1";
+const port = Number(process.env.PORT || 37214);
+const hostname = process.env.HOST || "0.0.0.0";
 const root = __dirname;
+function teamAddresses() {
+  return [
+    ...new Set(
+      Object.values(networkInterfaces())
+        .flat()
+        .filter(
+          (entry) =>
+            entry.family === "IPv4" &&
+            !entry.internal &&
+            !entry.address.startsWith("169.254."),
+        )
+        .map((entry) => entry.address),
+    ),
+  ];
+}
 const types = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
@@ -52,7 +67,7 @@ const server = http.createServer(async (incoming, outgoing) => {
       let length = 0;
       for await (const chunk of incoming) {
         length += chunk.length;
-        if (length > 200000) {
+        if (length > (url.pathname === "/api/keywords" ? 600000 : 200000)) {
           outgoing.writeHead(413, { "Content-Type": "application/json" });
           outgoing.end(JSON.stringify({ error: "요청이 너무 큽니다." }));
           return;
@@ -157,25 +172,26 @@ function openBrowser(url) {
 if (require.main === module) {
   server.listen(port, hostname, () => {
     const localHost = ["0.0.0.0", "::"].includes(hostname)
-      ? "127.0.0.1"
+      ? teamAddresses()[0] || "127.0.0.1"
       : hostname;
     const url = `http://${localHost}:${port}/`;
     console.log(
-      "ORBITAL: " + url + "\nStop: Ctrl+C. Database: data/orbital.sqlite",
+      "ORBITAL: " +
+        url +
+        "\nStop: Ctrl+C. Database: " +
+        (process.env.ORBITAL_DATABASE || "data/orbital.sqlite"),
     );
     if (hostname === "0.0.0.0") {
       console.log("Team access (same Wi-Fi / LAN):");
-      const addresses = new Set(
-        Object.values(networkInterfaces())
-          .flat()
-          .filter((entry) => entry.family === "IPv4" && !entry.internal)
-          .map((entry) => entry.address),
-      );
-      for (const address of addresses)
+      for (const address of teamAddresses())
         console.log(`  http://${address}:${port}/`);
       console.log("Keep this window open. All visitors share this database.");
     }
     if (process.argv.includes("--open")) openBrowser(url);
+    require("./server/article-worker")
+      .startArticleWorker()
+      .catch((error) => console.error("AI worker:", error.message));
+    require("./server/research").resumeResearchJobs();
   });
 }
 module.exports = { server };

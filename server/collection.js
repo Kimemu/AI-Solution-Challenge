@@ -4,6 +4,7 @@ const { db, insertSignals, log } = require("./database");
 const { getFeed, MAX_ITEMS_PER_SOURCE, normalizeSignal } = require("./signals");
 const { json, now, uid } = require("./utils");
 const { asObject, text } = require("./validation");
+const { enqueueArticles } = require("./article-worker");
 function collectionStatus(details) {
   const healthy = details.filter((source) => source.status === "ok").length;
   return healthy === sourceFeeds.length
@@ -13,7 +14,13 @@ function collectionStatus(details) {
       : "failed";
 }
 function collectionSummary(details, added) {
-  return `${details.filter((source) => source.status === "ok").length}/${sourceFeeds.length}개 피드 확인 · 신규 ${added}건`;
+  const searched = details
+    .filter((source) => source.status === "ok")
+    .reduce((total, source) => total + source.count, 0);
+  const googleNews = details
+    .filter((source) => source.status === "ok" && source.id.startsWith("news-"))
+    .reduce((total, source) => total + source.count, 0);
+  return `${details.filter((source) => source.status === "ok").length}/${sourceFeeds.length}개 피드 확인 · Google News ${googleNews}건 조회 · 전체 ${searched}건 · 신규 ${added}건`;
 }
 async function refresh(actor) {
   const startedAt = now();
@@ -21,12 +28,12 @@ async function refresh(actor) {
     .prepare(
       "INSERT INTO records (id,kind,data,revision,updated_at) VALUES ('refresh-lock','system','{}',1,?) ON CONFLICT(id) DO UPDATE SET updated_at=excluded.updated_at WHERE records.updated_at < ?",
     )
-    .bind(startedAt, new Date(Date.now() - 60000).toISOString())
+    .bind(startedAt, new Date(Date.now() - 10000).toISOString())
     .run();
   if (!lease.meta.changes)
     return {
       throttled: true,
-      message: "최근 수집 작업이 실행됐습니다. 잠시 후 다시 시도해 주세요.",
+      message: "10초 이내에 수집이 실행됐습니다. 잠시 후 다시 시도해 주세요.",
     };
   const runId = uid();
   await db()
@@ -57,6 +64,10 @@ async function refresh(actor) {
       });
   });
   const added = await insertSignals(signals);
+  await enqueueArticles(undefined, {
+    retryFailed: true,
+    signalIds: signals.map((signal) => signal.id),
+  });
   const status = collectionStatus(details);
   const finishedAt = now();
   await db().batch([
@@ -67,7 +78,21 @@ async function refresh(actor) {
       .bind(finishedAt, status, added, json(details), runId),
     log("수집·분류", runId, collectionSummary(details, added), actor),
   ]);
-  return { runId, status, added, details, finishedAt };
+  const fetched = details
+    .filter((source) => source.status === "ok")
+    .reduce((total, source) => total + source.count, 0);
+  const googleNewsResults = details
+    .filter((source) => source.status === "ok" && source.id.startsWith("news-"))
+    .reduce((total, source) => total + source.count, 0);
+  return {
+    runId,
+    status,
+    added,
+    fetched,
+    googleNewsResults,
+    details,
+    finishedAt,
+  };
 }
 async function ingest(body, actor) {
   if (!Array.isArray(body.sources) || body.sources.length > sourceFeeds.length)
@@ -113,6 +138,10 @@ async function ingest(body, actor) {
         error: "수집 결과 미제출",
       });
   const added = await insertSignals(signals);
+  await enqueueArticles(undefined, {
+    retryFailed: true,
+    signalIds: signals.map((signal) => signal.id),
+  });
   const status = collectionStatus(details);
   const finishedAt = now();
   await db().batch([
