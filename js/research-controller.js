@@ -24,6 +24,7 @@
       searching: false,
       starting: false,
       exporting: false,
+      showAllKeywords: false,
     };
     let initialized = false,
       scopeTimer,
@@ -114,6 +115,7 @@
       const next = { ...data.scope, [key]: value };
       data.scope = next;
       data.page = 1;
+      data.showAllKeywords = false;
       data.selectedKeyword = "";
       data.activeId = null;
       data.result = null;
@@ -322,6 +324,10 @@
         sessions: state.records.filter((record) => record.kind === "research"),
         setResearchScope: setScope,
         discoverKeywords: discover,
+        toggleKeywords() {
+          data.showAllKeywords = !data.showAllKeywords;
+          render();
+        },
         chooseKeyword,
         selectSession,
         openArticle,

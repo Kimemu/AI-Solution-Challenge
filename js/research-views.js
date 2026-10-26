@@ -181,6 +181,7 @@
       setResearchScope,
       discoverKeywords,
       chooseKeyword,
+      toggleKeywords,
     } = m;
     const keywords = r.discovery?.data.keywords || r.overview?.keywords || [];
     const corpusCount = r.discovery?.data.total ?? r.overview?.total ?? 0;
@@ -188,118 +189,162 @@
       (country) =>
         r.scope.continent === "all" || country.continent === r.scope.continent,
     );
+    const visibleKeywords = r.showAllKeywords ? keywords : keywords.slice(0, 3);
     return html`<div class="explore-flow">
-      <section class="panel research-search">
-        <div class="research-search-title">
-          <span class="step-number">01</span>
-          <div>
-            <h2>탐색 범위를 정하세요</h2>
-            <p>
-              선택한 기간과 대륙의 기사를 검색해 자주 등장하는 키워드를
-              찾습니다.
-            </p>
-          </div>
-        </div>
-        <div class="scope-controls">
-          <label
-            >기간<select
-              aria-label="검색 기간"
-              ${a({
-                value: r.scope.range,
-                onChange: (e) => setResearchScope("range", e.target.value),
-              })}
-            >
-              <option value="7">최근 7일</option>
-              <option value="30">최근 30일</option>
-              <option value="90">최근 90일</option>
-              <option value="custom">직접 지정</option>
-            </select></label
-          ><label
-            >대륙<select
-              aria-label="검색 대륙"
-              ${a({
-                value: r.scope.continent,
-                onChange: (e) => setResearchScope("continent", e.target.value),
-              })}
-            >
-              ${config.continents.map(
-                (continent) =>
-                  html`<option${a({ value: continent.id })}>${continent.name}</option>`,
-              )}
-            </select></label
-          >${r.scope.range === "custom" &&
-          html`<label
-              >시작일<input
-                type="date"
-                aria-label="검색 시작일"
-                ${a({
-                  value: r.scope.from,
-                  onChange: (e) => setResearchScope("from", e.target.value),
-                })} /></label
-            ><label
-              >종료일<input
-                type="date"
-                aria-label="검색 종료일"
-                ${a({
-                  value: r.scope.to,
-                  onChange: (e) => setResearchScope("to", e.target.value),
-                })}
-            /></label>`}<button
-            class="primary"
-            ${a({
-              onClick: discoverKeywords,
-              disabled: r.searching || !m.connected,
-            })}
-          >
-            ${icon(r.searching ? "RefreshCw" : "Search", 15)}${r.searching
-              ? "뉴스 검색 중"
-              : "뉴스 검색"}
-          </button>
-        </div>
-        <div class="scope-meta">
-          <span>${r.scope.from} — ${r.scope.to}</span
-          ><span
-            >기존 8개 피드 + ${covered.length}개국 · 주요 매체
-            ${covered.length * 5}곳</span
-          >
-        </div>
-        ${r.searching && progress(r.discovery)}
-      </section>
-      <section class="panel keyword-section">
-        <div class="research-section-heading">
-          <div class="research-search-title">
-            <span class="step-number">02</span>
+      ${!newsOnly &&
+      html`<div class="research-home-grid">
+        <section class="panel globe-panel research-globe">
+          <div class="research-section-heading">
             <div>
-              <h2>키워드를 선택하세요</h2>
-              <p>
-                서로 다른 기사에 등장한 빈도순 · 기사 1건은 키워드당 한 번 집계
-              </p>
+              <span class="eyebrow">GEOGRAPHIC SIGNALS</span>
+              <h2>글로벌 시그널</h2>
             </div>
+            <span class="live-pill"
+              ><i></i>${m.relatedCountries.length
+                ? `${m.relatedCountries.length}개국`
+                : "탐색 대기"}</span
+            >
           </div>
-          <span class="corpus-count"
-            >${corpusCount.toLocaleString()}개 기사 분석 범위</span
-          >
+          <div id="globe-root"></div>
+          <div class="country-chips">
+            ${m.relatedCountries.map(
+              (country) =>
+                html`<button${a({ className: m.selectedCountry === country.mapName ? "selected" : "", onClick: () => m.setSelectedCountry(m.selectedCountry === country.mapName ? null : country.mapName) })}>${country.name}<b>${country.count}</b></button>`,
+            )}
+          </div>
+          <p class="geo-note">
+            ${m.relatedCountries.length
+              ? "선택한 키워드의 기사에서 연결된 국가를 표시합니다."
+              : "키워드를 선택하면 관련 기사가 있는 국가만 빛나는 거점으로 표시됩니다."}
+          </p>
+        </section>
+        <div class="research-home-controls">
+          <section class="panel research-search">
+            <div class="research-search-title">
+              <span class="step-number">01</span>
+              <div>
+                <h2>탐색 범위를 정하세요</h2>
+                <p>
+                  선택한 기간과 대륙의 기사를 검색해 자주 등장하는 키워드를
+                  찾습니다.
+                </p>
+              </div>
+            </div>
+            <div class="scope-controls">
+              <label
+                >기간<select
+                  aria-label="검색 기간"
+                  ${a({
+                    value: r.scope.range,
+                    onChange: (e) => setResearchScope("range", e.target.value),
+                  })}
+                >
+                  <option value="7">최근 7일</option>
+                  <option value="30">최근 30일</option>
+                  <option value="90">최근 90일</option>
+                  <option value="custom">직접 지정</option>
+                </select></label
+              ><label
+                >대륙<select
+                  aria-label="검색 대륙"
+                  ${a({
+                    value: r.scope.continent,
+                    onChange: (e) =>
+                      setResearchScope("continent", e.target.value),
+                  })}
+                >
+                  ${config.continents.map(
+                    (continent) =>
+                      html`<option${a({ value: continent.id })}>${continent.name}</option>`,
+                  )}
+                </select></label
+              >${r.scope.range === "custom" &&
+              html`<label
+                  >시작일<input
+                    type="date"
+                    aria-label="검색 시작일"
+                    ${a({
+                      value: r.scope.from,
+                      onChange: (e) => setResearchScope("from", e.target.value),
+                    })} /></label
+                ><label
+                  >종료일<input
+                    type="date"
+                    aria-label="검색 종료일"
+                    ${a({
+                      value: r.scope.to,
+                      onChange: (e) => setResearchScope("to", e.target.value),
+                    })}
+                /></label>`}<button
+                class="primary"
+                ${a({
+                  onClick: discoverKeywords,
+                  disabled: r.searching || !m.connected,
+                })}
+              >
+                ${icon(r.searching ? "RefreshCw" : "Search", 15)}${r.searching
+                  ? "뉴스 검색 중"
+                  : "뉴스 검색"}
+              </button>
+            </div>
+            <div class="scope-meta">
+              <span>${r.scope.from} — ${r.scope.to}</span
+              ><span
+                >기존 8개 피드 + ${covered.length}개국 · 주요 매체
+                ${covered.length * 5}곳</span
+              >
+            </div>
+            ${r.searching && progress(r.discovery)}
+          </section>
+          <section class="panel keyword-section">
+            <div class="research-section-heading keyword-heading">
+              <div class="research-search-title">
+                <span class="step-number">02</span>
+                <div>
+                  <h2>키워드를 선택하세요</h2>
+                  <p>
+                    서로 다른 기사에 등장한 빈도순 · 기사 1건은 키워드당 한 번
+                    집계
+                  </p>
+                </div>
+              </div>
+              <span class="corpus-count"
+                >${corpusCount.toLocaleString()}개 기사 분석 범위</span
+              >
+              ${keywords.length > 3 &&
+              html`<button
+                class="keyword-toggle"
+                aria-expanded="${r.showAllKeywords}"
+                ${a({ onClick: toggleKeywords })}
+              >
+                <span aria-hidden="true">${r.showAllKeywords ? "−" : "⋯"}</span
+                >${r.showAllKeywords
+                  ? "접기"
+                  : `더보기 ${keywords.length - 3}개`}
+              </button>`}
+            </div>
+            <div class="keyword-cloud">
+              ${visibleKeywords.map(
+                (keyword, index) =>
+                  html`<button${a({ className: "keyword-chip " + (r.selectedKeyword === keyword.word ? "selected" : ""), disabled: r.searching || r.starting, onClick: () => chooseKeyword(keyword.word) })}><small>${String(index + 1).padStart(2, "0")}</small><span>${keyword.word}</span><b>${keyword.count}</b></button>`,
+              )}
+            </div>
+            ${!keywords.length &&
+            html`<p class="empty-keywords">
+              ${r.searching
+                ? "실시간 피드를 확인하고 있습니다."
+                : "뉴스 검색을 실행하면 이곳에 빈도 기반 키워드가 나타납니다."}
+            </p>`}
+            <div class="keyword-footnote">
+              ${icon("Orbit", 14)} 키워드 선택 시 관련 기사와 검토 초안을
+              자동으로 준비합니다.
+            </div>
+            ${r.discovery?.error &&
+            !r.searching &&
+            html`<p class="job-error">${r.discovery.error}</p>`}
+          </section>
         </div>
-        <div class="keyword-cloud">
-          ${keywords.map(
-            (keyword, index) =>
-              html`<button${a({ className: "keyword-chip " + (r.selectedKeyword === keyword.word ? "selected" : ""), disabled: r.searching || r.starting, onClick: () => chooseKeyword(keyword.word) })}><small>${String(index + 1).padStart(2, "0")}</small><span>${keyword.word}</span><b>${keyword.count}</b></button>`,
-          )}
-        </div>
-        ${!keywords.length &&
-        html`<p class="empty-keywords">
-          ${r.searching
-            ? "실시간 피드를 확인하고 있습니다."
-            : "뉴스 검색을 실행하면 이곳에 빈도 기반 키워드가 나타납니다."}
-        </p>`}
-        <div class="keyword-footnote">
-          ${icon("Orbit", 14)} 키워드를 누르면 관련 기사·국가, 사업 검토, 판단
-          초안, 검증 계획, 예산과 보고서가 함께 준비됩니다.
-        </div>
-        ${r.discovery?.error &&
-        !r.searching &&
-        html`<p class="job-error">${r.discovery.error}</p>`}
-      </section>
+      </div>`}
       ${m.currentSession &&
       html`<div class="analysis-heading">
           <div>
@@ -318,34 +363,7 @@
         html`<button class="text-btn" ${a({ onClick: m.retryAnalysis })}>
           ${icon("RefreshCw", 13)} 미완료 분석 재시도
         </button>`}`}
-      ${newsOnly
-        ? articles(m)
-        : html`<div class="research-results-grid">
-            <section class="panel globe-panel research-globe">
-              <div class="research-section-heading">
-                <div>
-                  <span class="eyebrow">GEOGRAPHIC SIGNALS</span>
-                  <h2>기사로 연결된 국가</h2>
-                </div>
-                <span class="live-pill"
-                  ><i></i>${m.relatedCountries.length}개국</span
-                >
-              </div>
-              <div id="globe-root"></div>
-              <div class="country-chips">
-                ${m.relatedCountries.map(
-                  (country) =>
-                    html`<button${a({ className: m.selectedCountry === country.mapName ? "selected" : "", onClick: () => m.setSelectedCountry(m.selectedCountry === country.mapName ? null : country.mapName) })}>${country.name}<b>${country.count}</b></button>`,
-                )}
-              </div>
-              <p class="geo-note">
-                ${m.relatedCountries.length
-                  ? "기사에 연결된 국가만 표시합니다. 제목에 국가가 없으면 매체 소재지를 사용하며 기사에서 근거를 확인할 수 있습니다."
-                  : "키워드 선택 후 기사가 확인된 국가만 빛나는 거점으로 표시됩니다."}
-              </p>
-            </section>
-            ${articles(m)}
-          </div>`}
+      ${(newsOnly || m.currentSession) && articles(m)}
     </div>`;
   }
   function reports(m) {

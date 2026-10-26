@@ -1023,7 +1023,12 @@
       </div>`;
   }
   function renderPageHeading({ view, refreshing, setModal, lastRun, refresh }) {
-    return html`<div class="page-heading">
+    return html`<div
+      class="page-heading"
+      ${attributes({
+        className: view === "overview" ? "home-page-heading" : "",
+      })}
+    >
       <div>
         <div class="eyebrow">INTELLIGENCE TO OPPORTUNITY</div>
         <h1>
@@ -1038,10 +1043,10 @@
                 reports: "최종보고서",
               }[view]}
         </h1>
-        <p>
-          ${view === "overview"
-            ? "기간과 대륙을 고르고, 뉴스 속 키워드를 다음 사업의 기회로 연결하세요."
-            : {
+        ${view === "overview"
+          ? null
+          : html`<p>
+              ${{
                 knowledge:
                   "출처·검증 상태·기업·기술을 연결한 전략 정보 라이브러리",
                 pipeline:
@@ -1055,7 +1060,7 @@
                 reports:
                   "선택한 기사의 근거와 아이디어, 예산을 결재용 보고안으로 정리합니다.",
               }[view]}
-        </p>
+            </p>`}
       </div>
       <div class="heading-actions">
         ${view === "pipeline"
