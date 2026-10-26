@@ -16,7 +16,6 @@
   const Sprout = (props = {}) => svgIcon("Sprout", props);
   const Globe2 = (props = {}) => svgIcon("Globe2", props);
   const BookOpen = (props = {}) => svgIcon("BookOpen", props);
-  const Target = (props = {}) => svgIcon("Target", props);
   const renderGlobePlaceholder = () => html`<div id="globe-root"></div>`;
   const Check = (props = {}) => svgIcon("Check", props);
   const Loader2 = (props = {}) => svgIcon("Loader2", props);
@@ -52,13 +51,9 @@
     space: Orbit,
   };
   const navs = [
-    { id: "overview", name: "글로벌 인사이트", icon: Globe2 },
-    { id: "knowledge", name: "뉴스·지식베이스", icon: BookOpen },
+    { id: "overview", name: "요약", icon: Globe2 },
     { id: "pipeline", name: "사업·투자 검토", icon: Layers3 },
-    { id: "decisions", name: "의사결정 기록", icon: FileCheck2 },
-    { id: "performance", name: "가정·실적 관리", icon: Target },
-    { id: "sources", name: "수집·업데이트", icon: Database },
-    { id: "reports", name: "최종보고서", icon: FileCheck2 },
+    { id: "knowledge", name: "뉴스·지식베이스", icon: BookOpen },
   ];
   const dateFormatter = new Intl.DateTimeFormat("ko-KR", {
     timeZone: "Asia/Seoul",
@@ -258,8 +253,9 @@
             "reports",
             "sources",
           ].includes(view) &&
-          window.OrbitalResearchViews.workflow(model)}${view === "pipeline" &&
-          renderPipeline({ ...model })}${view === "decisions" &&
+          window.OrbitalResearchViews.workflow(model)}${(view === "pipeline" ||
+          view === "reports") && renderPortfolioTabs({ ...model })}${view ===
+          "pipeline" && renderPipeline({ ...model })}${view === "decisions" &&
           renderDecisions({ ...model })}${view === "performance" &&
           renderPerformance({ ...model })}${view === "sources" &&
           window.OrbitalResearchViews.sources(model)}${view === "reports" &&
@@ -1033,14 +1029,14 @@
         <div class="eyebrow">INTELLIGENCE TO OPPORTUNITY</div>
         <h1>
           ${view === "overview"
-            ? "글로벌 인사이트"
+            ? "요약"
             : {
                 knowledge: "관련 기사·지식베이스",
                 pipeline: "사업·투자 검토",
                 decisions: "의사결정 기록",
                 performance: "가정·실적 관리",
                 sources: "수집·업데이트",
-                reports: "최종보고서",
+                reports: "사업·투자 검토",
               }[view]}
         </h1>
         ${view === "overview"
@@ -1058,7 +1054,7 @@
                 sources:
                   "공식 RSS와 분야별 뉴스 검색 피드를 수집하고, 중복 제거·분류 후 저장합니다.",
                 reports:
-                  "선택한 기사의 근거와 아이디어, 예산을 결재용 보고안으로 정리합니다.",
+                  "사업 검토 안건을 평가하고 근거·예산을 결재용 보고안으로 정리합니다.",
               }[view]}
             </p>`}
       </div>
@@ -1250,6 +1246,25 @@
         )}
       </div>`;
   }
+  function renderPortfolioTabs({ view, setView }) {
+    const tabs = [
+      { id: "pipeline", label: "사업·투자 검토" },
+      { id: "reports", label: "보고서" },
+    ];
+    return html`<nav class="portfolio-tabs" aria-label="사업·투자 검토 메뉴">
+      ${tabs.map(
+        (tab) =>
+          html`<button
+            type="button"
+            aria-current="${view === tab.id ? "page" : "false"}"
+            ${attributes({
+              className: view === tab.id ? "active" : "",
+              onClick: () => setView(tab.id),
+            })}
+          >${tab.label}</button>`,
+      )}
+    </nav>`;
+  }
   function renderEmptyState({ children }) {
     return html`<div class="empty">
       <div>${Orbit({ size: 25 })}</div>
@@ -1284,33 +1299,55 @@
   function renderSidebar({
     view,
     setView,
-    sector,
-    setSector,
     signals,
-    counts,
     lastRun,
     schedule,
     switchView,
   }) {
-    return html`<aside class="sidebar"><a class="brand" href="#"${attributes({
-      onClick: (e) => {
-        e.preventDefault();
-        switchView("overview");
-      },
-    })}><span class="brand-icon">${Orbit({ size: 25 })}</span><span>ORBITAL<span class="brand-dot">.</span><small>FUTURE STRATEGY</small></span></a><div class="workspace-label">STRATEGY WORKSPACE</div><nav>${navs.map((n) => html`<button${attributes({ className: view === n.id ? "active" : "" })}${attributes({ onClick: () => switchView(n.id), "aria-label": n.name, title: n.name })}>${n.icon({ size: 17 })}<span>${n.name}</span>${n.id === "knowledge" && signals.length > 0 && html`<em>${signals.length}</em>`}</button>`)}</nav><div class="sidebar-rule"></div><div class="workspace-label">WATCHLIST / 관심 분야</div><div class="sector-nav">${sectors.map(
-      (s) =>
-        html`<button${attributes({
-          onClick: () => {
-            setSector(sector === s.id ? "all" : s.id);
-            if (view !== "overview" && view !== "knowledge")
-              setView("knowledge");
-          },
-        })}${attributes({ className: sector === s.id ? "selected" : "" })}><i${attributes({ style: { background: s.color } })}></i>${s.name}<span>${counts[s.id] || "—"}</span></button>`,
-    )}</div><div class="sidebar-bottom"><div class="connection"><i${attributes({ className: schedule?.enabled ? "green-dot" : "amber-dot" })}></i><span>${schedule?.enabled ? "1시간 자동 갱신" : "로컬 데이터 관리"}<small>${
-      lastRun?.finished_at
-        ? "최근 수집 " + formatDate(lastRun.finished_at, true)
-        : "아직 수집 이력 없음"
-    }</small></span></div><button${attributes({ onClick: () => setView("sources") })}>${Settings2({ size: 14 })} 수집 상태 확인 ${ChevronRight({ size: 13 })}</button></div></aside>`;
+    return html`<aside class="sidebar">
+      <a class="brand" href="#"${attributes({
+        onClick: (e) => {
+          e.preventDefault();
+          switchView("overview");
+        },
+      })}>
+        <span class="brand-icon">${Orbit({ size: 25 })}</span>
+        <span>ORBITAL<span class="brand-dot">.</span><small>FUTURE STRATEGY</small></span>
+      </a>
+      <div class="workspace-label">STRATEGY WORKSPACE</div>
+      <nav aria-label="주 메뉴">
+        ${navs.map(
+          (n) =>
+            html`<button
+              ${attributes({
+                className:
+                  view === n.id || (n.id === "pipeline" && view === "reports")
+                    ? "active"
+                    : "",
+                onClick: () => switchView(n.id),
+                "aria-label": n.name,
+                title: n.name,
+              })}
+            >
+              ${n.icon({ size: 17 })}<span>${n.name}</span>
+              ${n.id === "knowledge" && signals.length > 0 &&
+              html`<em>${signals.length}</em>`}
+            </button>`,
+        )}
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="connection">
+          <i${attributes({ className: schedule?.enabled ? "green-dot" : "amber-dot" })}></i>
+          <span>
+            ${schedule?.enabled ? "1시간 자동 갱신" : "로컬 데이터 관리"}
+            <small>${lastRun?.finished_at ? "최근 수집 " + formatDate(lastRun.finished_at, true) : "아직 수집 이력 없음"}</small>
+          </span>
+        </div>
+        <button${attributes({ onClick: () => setView("sources") })}>
+          ${Settings2({ size: 14 })} 수집 상태 확인 ${ChevronRight({ size: 13 })}
+        </button>
+      </div>
+    </aside>`;
   }
   function renderSignalDetail({
     setView,
