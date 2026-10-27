@@ -92,6 +92,17 @@
         return;
       }
       const version = ++discoveryVersion;
+      resultsVersion++;
+      clearTimeout(timers.get("analysis"));
+      timers.delete("analysis");
+      data.activeId = null;
+      data.selectedKeyword = "";
+      data.result = null;
+      data.analysis = null;
+      data.page = 1;
+      ui.selectedCountry = null;
+      ui.sector = "all";
+      ui.query = "";
       data.searching = true;
       data.discovery = null;
       render();
@@ -212,6 +223,10 @@
       } else if (data.activeId) await loadResults(data.activeId);
     }
     async function openArticle(article) {
+      if (
+        !core.isArticleVisible(article) ||
+        state.excludedSignalIds?.includes(article.id)
+      ) return;
       setModal({ type: "signal", data: article });
       try {
         const latest = await request(
@@ -219,6 +234,11 @@
         );
         if (ui.modal?.type !== "signal" || ui.modal.data.id !== article.id)
           return;
+        if (!core.isArticleVisible(latest)) {
+          setModal(null);
+          await load();
+          return;
+        }
         ui.modal.data = latest;
         if (
           !latest.articleAnalysis &&
@@ -238,6 +258,8 @@
           render();
         }
       } catch (error) {
+        if (ui.modal?.type === "signal" && ui.modal.data.id === article.id)
+          setModal(null);
         notify(error.message);
       }
     }
@@ -280,17 +302,34 @@
       }
     }
     function model() {
+      const excluded = new Set(state.excludedSignalIds || []);
       const session = state.records.find(
         (record) => record.id === data.activeId,
       );
-      const available = data.activeId
+      const keywords = (
+        data.discovery?.data.keywords || data.overview?.keywords || []
+      ).map((item) => ({
+        ...item, labelKo: core.keywordLabel(item.word, item.labelKo),
+      })).filter((item) => item.labelKo);
+      const selectedKeywordLabel = core.keywordLabel(
+        data.selectedKeyword,
+        keywords.find((item) => item.word === data.selectedKeyword)?.labelKo ||
+          session?.keywordLabel,
+      ) || "선택 키워드";
+      const available = (data.activeId
         ? (
             data.result?.articles ||
             state.signals.filter((signal) =>
               session?.articleIds?.includes(signal.id),
             )
-          ).map(core.enrich)
-        : [];
+          )
+        : state.signals.filter((signal) =>
+            signal.lastSeenAt && core.inScope(signal, data.scope),
+          ))
+        .filter((article) =>
+          !excluded.has(article.id) && core.isArticleVisible(article),
+        )
+        .map(core.enrich);
       const matches = available.filter(
         (signal) =>
           (ui.sector === "all" || ui.sector === signal.category) &&
@@ -310,7 +349,7 @@
       const pageCount = Math.max(1, Math.ceil(articles.length / 12));
       data.page = Math.min(data.page, pageCount);
       return {
-        research: data,
+        research: { ...data, keywords, selectedKeywordLabel },
         currentSession: session,
         researchArticles: articles,
         relatedCountries: countries,

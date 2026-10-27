@@ -104,8 +104,24 @@
     return { countryCodes: [], countryBasis: "unknown" };
   }
   function enrich(signal) {
-    if (signal.countryVersion === 2) return signal;
+    if (
+      signal.countryVersion === 2 &&
+      Array.isArray(signal.countryCodes) &&
+      signal.countryCodes.every((code) => typeof code === "string")
+    )
+      return signal;
     return { ...signal, ...countryInfo(signal), countryVersion: 2 };
+  }
+  function isArticleVisible(signal) {
+    if (
+      signal.articleExclusion ||
+      ["failed", "excluded"].includes(signal.articleJob?.status) ||
+      signal.articleAnalysis?.relevant === false ||
+      signal.articleAnalysis?.analysisBasis === "google-news-headline"
+    )
+      return false;
+    const summary = signal.articleAnalysis?.summary || "";
+    return !/기사 본문이 (없어|제공되지 않)|본문.{0,30}(확인할 수 없|요약하기 어렵|본문에서 확인되지)|구체적(인)? 사실.{0,20}(없|확인)|뉴스레터 안내/i.test(summary);
   }
   function inScope(signal, scope) {
     if (signal.kind !== "news" || signal.articleJob?.status === "failed")
@@ -142,6 +158,32 @@
       includesTerm(articleText(signal), term),
     );
   }
+  const keywordNames = new Map([
+    ["commercial", "상업"], ["property", "부동산"], ["rent", "임대"],
+    ["الطاقة", "에너지"], ["صاروخ", "로켓"], ["اعتراض", "요격"],
+    ["مصر", "이집트"], ["السعودية", "사우디아라비아"],
+    ["spacex", "스페이스X"], ["openai", "오픈AI"], ["hanwha", "한화"],
+  ]);
+  for (const topic of topics) {
+    keywordNames.set(topic.word.toLowerCase(), topic.word);
+    for (const alias of topic.aliases)
+      if (!/^(?:Qcells|GHGSat|InSAR|Starlink)$/i.test(alias.trim()))
+        keywordNames.set(alias.trim().toLowerCase(), topic.word);
+  }
+  function keywordLabel(word, translated) {
+    const original = String(word || "").normalize("NFKC").trim();
+    const known = keywordNames.get(original.toLowerCase());
+    if (known) return known;
+    const label = String(translated || original).normalize("NFKC").trim();
+    if (!label || label.length > 80) return null;
+    if ([...label].some((letter) =>
+      /\p{L}/u.test(letter) && !/[\p{Script=Hangul}A-Za-z]/u.test(letter),
+    )) return null;
+    if (/[가-힣]/.test(label)) return label;
+    if (/^(?:AI|GPT(?:[- ]?[0-9][A-Za-z0-9.-]*)?|NASA|ESA|SAR|AIS|GNSS|GPS|API|ICT|LED|OLED|EV|ESG|CO2|IEA|LNG|LPG|PV|GDP|IMF|EU|UN|LLM|NLP|RAG|CBAM|3GPP|MW|GW|kW|MWh|GWh|kWh|USD|EUR)$/.test(label)) return label;
+    if (/^(?:iPhone|iPad|GitHub|LiDAR|InSAR|IoT|5G|6G)$/i.test(label)) return label;
+    return null;
+  }
   const stop = new Set(
     "the and for with from this that into over after before more than says said will have has new news google reuters times update today latest world business report reports global year years first company companies how why its are was were not out about could would satellite satellites space solar nasa esa 한화 기사 뉴스 구글 뉴스에서 본문 제목 기반 분석 발표 대한 위한 통해 관련 이번 지난해 올해 제공 정보 시장 기업 한국어 요약 결과 한국 미국 today com www all you your what when now launches launch launched unveils announces announced breaking read video photos image get adds set plan plans".split(
       /\s+/,
@@ -150,6 +192,8 @@
   for (const word of "wants want wanted boss chief changes change country audio october november september august july june january february march april may december latest head headlines coverage story stories newness give gives going goes says asks tells sees shows show million billion next last still ahead amid back look looks top most big increase rise rising using during over under through around without need needs".split(
     /\s+/,
   ))
+    stop.add(word);
+  for (const word of "off des du les une aux pour avec dans sur par plus ces sont leur ses mais tout toute cette تطلق هذا هذه التي الذي على في من إلى مع عن".split(/\s+/))
     stop.add(word);
   function recommend(signals, scope) {
     const corpus = signals.filter((signal) => inScope(signal, scope));
@@ -237,9 +281,11 @@
     headline,
     countryInfo,
     enrich,
+    isArticleVisible,
     inScope,
     articleText,
     matches,
+    keywordLabel,
     recommend,
     countryCounts,
     stageFor,

@@ -5,7 +5,7 @@ const os = require("node:os");
 const { spawn } = require("node:child_process");
 const { db, rowData } = require("./database");
 const { countries, templateSources } = require("../js/research-config");
-const { enrich, dayOf, headline } = require("../js/research-core");
+const { enrich, dayOf, headline, isArticleVisible } = require("../js/research-core");
 const escape = (value) =>
   String(value ?? "").replace(
     /[&<>"']/g,
@@ -54,9 +54,12 @@ function reportData(id) {
     .sort((a, b) => b.score - a.score);
   const evidenceIds = new Set(ideas.flatMap((idea) => idea.evidenceIds || []));
   const evidence = db()
-    .prepare("SELECT data FROM signals")
+    .prepare(
+      "SELECT s.data FROM signals s LEFT JOIN article_jobs j ON j.signal_id=s.id WHERE COALESCE(j.status,'')!='failed'",
+    )
     .all()
     .results.map((row) => enrich(JSON.parse(row.data)))
+    .filter(isArticleVisible)
     .filter((signal) => evidenceIds.has(signal.id))
     .map(
       ({

@@ -114,7 +114,7 @@
     ["탄소·환경", "emission,emissions,carbon,climate,탄소,배출,기후,carbone"],
     [
       "에너지",
-      "energy,renewable,battery,power,electricity,에너지,배터리,재생에너지,énergie,energia",
+      "energy,renewable,battery,power,electricity,에너지,배터리,재생에너지,énergie,energia,energía,الطاقة,طاقة",
     ],
     [
       "투자·계약",

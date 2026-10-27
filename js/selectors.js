@@ -3,7 +3,9 @@
   const { sectors } = window.OrbitalConfig;
   function selectDashboard(state, sector, query, newsMode, researchId) {
     const records = state?.records ?? [];
-    const signals = state?.signals ?? [];
+    const signals = (state?.signals ?? []).filter(
+      window.OrbitalResearchCore.isArticleVisible,
+    );
     const scoped = records.filter(
       (record) => !researchId || record.researchId === researchId,
     );

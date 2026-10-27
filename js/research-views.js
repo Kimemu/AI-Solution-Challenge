@@ -50,7 +50,7 @@
           <option value="">전체 워크스페이스</option>
           ${sessions.map(
             (session) =>
-              html`<option${a({ value: session.id })}>${session.keyword} · ${date(session.createdAt)} · 기사 ${session.articleCount}건</option>`,
+              html`<option${a({ value: session.id })}>${window.OrbitalResearchCore.keywordLabel(session.keyword, session.keywordLabel) || "분석 이력"} · ${date(session.createdAt)} · 기사 ${session.articleCount}건</option>`,
           )}
         </select></label
       ><span class="context-description"
@@ -116,7 +116,7 @@
           <span class="eyebrow">RELATED ARTICLES</span>
           <h2>
             ${m.research.selectedKeyword
-              ? `'${m.research.keywords?.find((item) => item.word === m.research.selectedKeyword)?.labelKo || m.research.selectedKeyword}' 관련 기사`
+              ? `'${m.research.selectedKeywordLabel || "선택 키워드"}' 관련 기사`
               : "관련 기사"}<small>${m.researchArticles.length}</small>
           </h2>
         </div>
@@ -182,7 +182,9 @@
       chooseKeyword,
       toggleKeywords,
     } = m;
-    const keywords = r.discovery?.data.keywords || r.overview?.keywords || [];
+    const keywords = (r.keywords || r.discovery?.data.keywords || r.overview?.keywords || [])
+      .map((item) => ({ ...item, labelKo: window.OrbitalResearchCore.keywordLabel(item.word, item.labelKo) }))
+      .filter((item) => item.labelKo);
     const corpusCount = r.discovery?.data.total ?? r.overview?.total ?? 0;
     const covered = config.countries.filter(
       (country) =>
@@ -213,8 +215,10 @@
           </div>
           <p class="geo-note">
             ${m.relatedCountries.length
-              ? "선택한 키워드의 기사에서 연결된 국가를 표시합니다."
-              : "키워드를 선택하면 관련 기사가 있는 국가만 빛나는 거점으로 표시됩니다."}
+              ? r.selectedKeyword
+                ? "선택한 키워드의 기사에서 연결된 국가를 표시합니다."
+                : "현재 탐색 범위의 전체 기사에 연결된 국가를 표시합니다."
+              : "탐색 범위에 관련 기사가 있는 국가를 빛나는 거점으로 표시합니다."}
           </p>
         </section>
         <div class="research-home-controls">
@@ -325,7 +329,7 @@
             <div class="keyword-cloud">
               ${visibleKeywords.map(
                 (keyword, index) =>
-                  html`<button${a({ className: "keyword-chip " + (r.selectedKeyword === keyword.word ? "selected" : ""), disabled: r.searching || r.starting, onClick: () => chooseKeyword(keyword.word) })}><small>${String(index + 1).padStart(2, "0")}</small><span>${keyword.labelKo || keyword.word}</span><b>${keyword.count}</b></button>`,
+                  html`<button${a({ className: "keyword-chip " + (r.selectedKeyword === keyword.word ? "selected" : ""), disabled: r.searching || r.starting, onClick: () => chooseKeyword(keyword.word) })}><small>${String(index + 1).padStart(2, "0")}</small><span>${keyword.labelKo}</span><b>${keyword.count}</b></button>`,
               )}
             </div>
             ${!keywords.length &&
@@ -348,7 +352,7 @@
       html`<div class="analysis-heading">
           <div>
             <span class="eyebrow">CONNECTED WORKSPACE</span>
-            <h2>${r.keywords?.find((item) => item.word === r.selectedKeyword)?.labelKo || r.selectedKeyword} <small>분석 워크스페이스</small></h2>
+            <h2>${r.selectedKeywordLabel || "선택 키워드"} <small>분석 워크스페이스</small></h2>
           </div>
           <div class="analysis-numbers">
             <span><b>${m.researchArticles.length}</b>기사</span
@@ -362,7 +366,7 @@
         html`<button class="text-btn" ${a({ onClick: m.retryAnalysis })}>
           ${icon("RefreshCw", 13)} 미완료 분석 재시도
         </button>`}`}
-      ${(newsOnly || m.currentSession) && articles(m)}
+      ${(newsOnly || m.currentSession || m.selectedCountry) && articles(m)}
     </div>`;
   }
   function reports(m) {
@@ -567,7 +571,7 @@
         ].map(([num, title, text]) => reportSection(num, title, text))}
         <section class="report-section">
           <h2><span>09</span>근거 기사</h2>
-          <p>근거 기사 ${evidenceIds.size}건</p>
+          <p>근거 기사 ${evidenceArticles.length}건</p>
           <div class="report-evidence">
             ${evidenceArticles
               .slice(0, 3)

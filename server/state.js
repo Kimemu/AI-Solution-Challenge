@@ -3,7 +3,8 @@ const { investmentScore, sectorOf, sourceFeeds } = require("../js/config");
 const { db, rowData } = require("./database");
 const { analysis } = require("./signals");
 const { json, now } = require("./utils");
-const { enrich } = require("../js/research-core");
+const { enrich, isArticleVisible } = require("../js/research-core");
+const { keywordLabelFor } = require("./headline-translations");
 async function initialize() {
   const seeds = [
     [
@@ -121,7 +122,7 @@ async function initialize() {
 }
 async function getState() {
   await initialize();
-  const [sig, rec, logs, runs] = await Promise.all([
+  const [sig, rec, logs, runs, excluded] = await Promise.all([
     db()
       .prepare(
         "SELECT s.* FROM signals s WHERE json_extract(s.data,'$.lastSeenAt') IS NOT NULL OR s.id LIKE 'reference-%' OR EXISTS (SELECT 1 FROM records r, json_each(r.data, '$.evidenceIds') e WHERE r.kind='opportunity' AND e.value=s.id) ORDER BY COALESCE(json_extract(s.data,'$.lastSeenAt'),s.collected_at) DESC LIMIT 2000",
@@ -135,8 +136,14 @@ async function getState() {
     db()
       .prepare("SELECT * FROM refresh_runs ORDER BY started_at DESC LIMIT 20")
       .all(),
+    db()
+      .prepare(
+        "SELECT s.id FROM signals s LEFT JOIN article_jobs j ON j.signal_id=s.id WHERE j.status IN ('failed','excluded') OR json_extract(s.data,'$.articleExclusion') IS NOT NULL OR json_extract(s.data,'$.articleAnalysis.analysisBasis')='google-news-headline'",
+      )
+      .all(),
   ]);
   return {
+    excludedSignalIds: excluded.results.map((row) => row.id),
     signals: (
       await Promise.all(
         sig.results.map(async (r) => {
@@ -167,8 +174,13 @@ async function getState() {
           return { ...signal, articleJob: job || null };
         }),
       )
-    ).filter((signal) => signal.articleJob?.status !== "failed"),
-    records: rec.results.map(rowData),
+    ).filter(isArticleVisible),
+    records: rec.results.map((row) => {
+      const record = rowData(row);
+      return record.kind === "research"
+        ? { ...record, keywordLabel: keywordLabelFor(record.keyword, record.keywordLabel) }
+        : record;
+    }),
     audit: logs.results,
     runs: runs.results.map((r) => ({
       ...r,

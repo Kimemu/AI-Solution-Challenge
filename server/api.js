@@ -87,8 +87,14 @@ async function handleApi(request, path) {
         .prepare("SELECT status,error FROM article_jobs WHERE signal_id=?")
         .bind(path.slice(8))
         .first();
+      const signal = { ...JSON.parse(row.data), articleJob: job || null };
+      if (!require("../js/research-core").isArticleVisible(signal))
+        return Response.json(
+          { error: "표시할 기사가 없습니다." },
+          { status: 404, headers: { "Cache-Control": "no-store" } },
+        );
       return Response.json(
-        { ...JSON.parse(row.data), articleJob: job || null },
+        signal,
         { headers: { "Cache-Control": "no-store" } },
       );
     }

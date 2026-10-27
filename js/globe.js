@@ -23,65 +23,21 @@
       };
       this.media = matchMedia("(prefers-reduced-motion: reduce)");
       this.playing = saved.playing ?? !this.media.matches;
+      this.resumeAt = saved.resumeAt || 0;
+      this.activePointers = new Set();
       this.dirty = true;
       this.disposed = false;
       this.visible = true;
       this.drag = null;
-      this.hover = false;
-      this.focused = false;
       this.lastFrame = 0;
-      root.innerHTML = `<div class="globe-scene"><canvas class="globe-surface" tabindex="0" role="img" aria-label="3D 지구본. 방향키로 회전, 더하기와 빼기로 확대·축소, Home으로 초기화합니다."></canvas><canvas class="globe-decoration" aria-hidden="true"></canvas><div class="globe-top"><span>ORBITAL VIEW / EARTH</span><span>3D EARTH VIEW</span></div><div class="globe-markers"></div><p class="globe-caption">드래그하여 회전 · 빛나는 거점을 클릭하세요</p><div class="globe-controls" role="group" aria-label="지구본 조작"><button data-globe="play" aria-label="지구 자전 일시정지"></button><span></span><button data-globe="plus" aria-label="지구 확대">＋</button><button data-globe="minus" aria-label="지구 축소">−</button><span></span><button data-globe="reset" aria-label="아시아로 보기 초기화">↺</button></div><div class="globe-status" role="status">지구 표면을 불러오는 중입니다.</div></div>`;
+      root.innerHTML = `<div class="globe-scene"><canvas class="globe-surface" tabindex="0" role="img" aria-label="3D 지구본. 방향키로 회전, 더하기와 빼기로 확대·축소, Home으로 초기화합니다."></canvas><canvas class="globe-decoration" aria-hidden="true"></canvas><div class="globe-top"><span>ORBITAL VIEW / EARTH</span><span>3D EARTH VIEW</span></div><div class="globe-markers"></div><p class="globe-caption">드래그하여 회전 · 빛나는 거점을 클릭하세요</p><div class="globe-controls" role="group" aria-label="지구본 조작"><button data-globe="play" aria-label="지구 자전 일시정지"></button><span></span><button data-globe="plus" aria-label="지구 확대">＋</button><button data-globe="minus" aria-label="지구 축소">−</button><span></span><button data-globe="reset" aria-label="아시아로 보기 초기화">↺</button></div><div class="globe-status" role="status" hidden></div></div>`;
       this.scene = root.firstElementChild;
       this.canvas = this.scene.querySelector(".globe-surface");
       this.overlay = this.scene.querySelector(".globe-decoration");
       this.context = this.overlay.getContext("2d");
       this.status = this.scene.querySelector(".globe-status");
       this.updatePlayButton();
-      const holder = this.scene.querySelector(".globe-markers");
-      this.locations = model.globeLocations || [];
-      this.markers = this.locations.map((location) => {
-        const button = document.createElement("button");
-        button.className = "globe-marker has-articles";
-        button.hidden = true;
-        button.setAttribute("aria-label", location.name + " 거점 선택");
-        button.setAttribute(
-          "aria-pressed",
-          String(model.selectedCountry === location.country),
-        );
-        if (model.selectedCountry === location.country)
-          button.classList.add("is-selected");
-        const dot = document.createElement("span");
-        dot.className = "globe-marker-dot";
-        const label = document.createElement("span");
-        label.className = "globe-marker-label";
-        const title = document.createElement("strong");
-        title.textContent = location.name;
-        const subtitle = document.createElement("small");
-        subtitle.textContent = `관련 기사 ${location.count}건`;
-        label.append(title, subtitle);
-        button.append(dot, label);
-        holder.append(button);
-        button.addEventListener("click", () =>
-          window.OrbitalApp.selectLocation(location),
-        );
-        button.addEventListener("pointerenter", () => {
-          this.hover = true;
-        });
-        button.addEventListener("pointerleave", () => {
-          this.hover = false;
-        });
-        return button;
-      });
-      if (model.selectedCountry) {
-        const clear = document.createElement("button");
-        clear.className = "globe-country-selection";
-        clear.textContent =
-          (this.locations.find((item) => item.country === model.selectedCountry)
-            ?.name || model.selectedCountry) + " ×";
-        clear.setAttribute("aria-label", "선택 국가 해제");
-        clear.onclick = () => model.setSelectedCountry(null);
-        this.scene.append(clear);
-      }
+      this.update(model);
       try {
         this.renderer = createGlobeRenderer(this.canvas, () =>
           this.showError(),
@@ -112,6 +68,56 @@
       this.bindControls();
       this.frame = requestAnimationFrame((time) => this.draw(time));
     }
+    update(model) {
+      this.model = model;
+      const locations = model.globeLocations || [];
+      const signature = JSON.stringify([model.selectedCountry, locations]);
+      this.dirty = true;
+      if (this.renderer?.loaded) this.renderer.render(this.view);
+      if (signature === this.markerSignature) return;
+      this.markerSignature = signature;
+      this.locations = locations;
+      const holder = this.scene.querySelector(".globe-markers");
+      holder.replaceChildren();
+      this.scene.querySelector(".globe-country-selection")?.remove();
+      this.markers = this.locations.map((location) => {
+        const button = document.createElement("button");
+        button.className = "globe-marker has-articles";
+        button.hidden = true;
+        button.setAttribute("aria-label", location.name + " 거점 선택");
+        button.setAttribute("aria-pressed", String(model.selectedCountry === location.country));
+        if (model.selectedCountry === location.country)
+          button.classList.add("is-selected");
+        const dot = document.createElement("span");
+        dot.className = "globe-marker-dot";
+        const label = document.createElement("span");
+        label.className = "globe-marker-label";
+        const title = document.createElement("strong");
+        title.textContent = location.name;
+        const subtitle = document.createElement("small");
+        subtitle.textContent = `관련 기사 ${location.count}건`;
+        label.append(title, subtitle);
+        button.append(dot, label);
+        holder.append(button);
+        button.addEventListener("click", () => {
+          this.pauseForInteraction();
+          window.OrbitalApp.selectLocation(location);
+        });
+        return button;
+      });
+      if (model.selectedCountry) {
+        const clear = document.createElement("button");
+        clear.className = "globe-country-selection";
+        clear.textContent = (this.locations.find((item) => item.country === model.selectedCountry)?.name || model.selectedCountry) + " ×";
+        clear.setAttribute("aria-label", "선택 국가 해제");
+        clear.onclick = () => {
+          this.pauseForInteraction();
+          this.model.setSelectedCountry(null);
+        };
+        this.scene.append(clear);
+      }
+      if (this.renderer?.loaded) this.positionMarkers();
+    }
     showError() {
       this.status.hidden = false;
       this.status.textContent =
@@ -138,16 +144,22 @@
       this.dirty = true;
     }
     bindControls() {
-      this.scene.addEventListener("focusin", () => {
-        this.focused = true;
+      this.scene.addEventListener("pointerdown", (event) => {
+        this.activePointers.add(event.pointerId);
+        this.pauseForInteraction();
       });
-      this.scene.addEventListener("focusout", (event) => {
-        if (!this.scene.contains(event.relatedTarget)) this.focused = false;
-      });
-      this.scene.querySelector('[data-globe="play"]').onclick = () => {
-        this.playing = !this.playing;
-        this.updatePlayButton();
+      this.onPointerEnd = (event) => {
+        if (this.activePointers.delete(event.pointerId))
+          this.pauseForInteraction();
       };
+      window.addEventListener("pointerup", this.onPointerEnd, true);
+      window.addEventListener("pointercancel", this.onPointerEnd, true);
+      this.scene.addEventListener("wheel", () => this.pauseForInteraction(), { passive: true });
+      this.scene.addEventListener("keydown", (event) => {
+        if (event.target !== this.canvas || event.key !== " ")
+          this.pauseForInteraction();
+      });
+      this.scene.querySelector('[data-globe="play"]').onclick = () => this.togglePlay();
       this.scene.querySelector('[data-globe="plus"]').onclick = () =>
         this.zoom(0.05);
       this.scene.querySelector('[data-globe="minus"]').onclick = () =>
@@ -180,8 +192,7 @@
         if (event.key === "-") this.zoom(-0.05);
         if (event.key === "Home") this.reset();
         if (event.key === " ") {
-          this.playing = !this.playing;
-          this.updatePlayButton();
+          this.togglePlay();
         }
         this.dirty = true;
       });
@@ -239,8 +250,9 @@
         }
       });
       for (const name of ["pointercancel", "lostpointercapture"])
-        this.canvas.addEventListener(name, () => {
+        this.canvas.addEventListener(name, (event) => {
           this.drag = null;
+          this.onPointerEnd(event);
           this.canvas.style.cursor = "grab";
         });
       this.canvas.addEventListener("webglcontextlost", (event) => {
@@ -248,11 +260,31 @@
         this.showError();
       });
     }
+    pauseForInteraction() {
+      this.resumeAt = performance.now() + 3000;
+      this.dirty = true;
+    }
+    togglePlay() {
+      this.playing = !this.playing;
+      if (this.playing) this.resumeAt = 0;
+      this.updatePlayButton();
+    }
+    advanceRotation(time, elapsed) {
+      if (
+        !this.playing || this.drag || this.activePointers.size ||
+        time < this.resumeAt || this.media.matches
+      ) return false;
+      const easing = this.resumeAt ? Math.min(1, (time - this.resumeAt) / 600) : 1;
+      this.view.yaw = (this.view.yaw + elapsed * 0.0025 * easing) % 360;
+      return true;
+    }
     zoom(delta) {
+      this.pauseForInteraction();
       this.view.zoom = Math.max(0.8, Math.min(1.15, this.view.zoom + delta));
       this.dirty = true;
     }
     reset() {
+      this.pauseForInteraction();
       Object.assign(this.view, {
         yaw: INITIAL_YAW,
         tilt: INITIAL_TILT,
@@ -268,16 +300,7 @@
       const elapsed = this.lastFrame ? Math.min(time - this.lastFrame, 80) : 0;
       this.lastFrame = time;
       if (!this.visible || document.hidden || !this.view.width) return;
-      if (
-        this.playing &&
-        !this.drag &&
-        !this.hover &&
-        !this.focused &&
-        !this.media.matches
-      ) {
-        this.view.yaw = (this.view.yaw + elapsed * 0.0025) % 360;
-        this.dirty = true;
-      }
+      if (this.advanceRotation(time, elapsed)) this.dirty = true;
       if (!this.dirty) return;
       this.dirty = false;
       this.renderer.render(this.view);
@@ -413,6 +436,10 @@
       cancelAnimationFrame(this.frame);
       this.resizeObserver?.disconnect();
       this.visibilityObserver?.disconnect();
+      if (this.onPointerEnd) {
+        window.removeEventListener("pointerup", this.onPointerEnd, true);
+        window.removeEventListener("pointercancel", this.onPointerEnd, true);
+      }
       if (this.onMotionChange)
         this.media.removeEventListener("change", this.onMotionChange);
       this.renderer?.dispose();

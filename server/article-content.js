@@ -1,6 +1,6 @@
 /** 기사 본문 캐시. 제목 요약과 실제 본문 요약을 구분합니다. */
 const { createHash } = require("node:crypto");
-const { db } = require("./database");
+const { db, log } = require("./database");
 const { headline, enrich } = require("../js/research-core");
 const { now, json } = require("./utils");
 function contentFor(signal) {
@@ -51,6 +51,7 @@ function saveContent(id, result) {
     sourceTitle: headline(signal),
     fetchedAt: result.fetchedAt || now(),
   };
+  delete signal.articleExclusion;
   const existing = signal.articleAnalysis;
   const reusable =
     existing?.analysisBasis === "article-body" &&
@@ -77,16 +78,48 @@ function saveContent(id, result) {
   ]);
   return updated.articleContent;
 }
-function failContent(id, error) {
-  db()
-    .prepare(
-      "INSERT INTO article_jobs (signal_id,status,error,updated_at) VALUES (?,'failed',?,?) ON CONFLICT(signal_id) DO UPDATE SET status='failed',error=excluded.error,updated_at=excluded.updated_at",
-    )
-    .bind(
-      id,
-      String(error || "공개 기사 본문을 확보하지 못했습니다.").slice(0, 400),
-      now(),
-    )
-    .run();
+function failContent(id, error, { discardSummary = false } = {}) {
+  const reason = String(
+    error || "공개 기사 본문을 확보하지 못했습니다.",
+  ).slice(0, 400);
+  const timestamp = now();
+  const operations = [];
+  const signalRow = db()
+    .prepare("SELECT data FROM signals WHERE id=?")
+    .bind(id)
+    .first();
+  if (signalRow) {
+    const signal = JSON.parse(signalRow.data);
+    signal.articleExclusion = {
+      reason,
+      excludedAt: timestamp,
+    };
+    if (discardSummary) {
+      if (signal.articleAnalysis?.summary)
+        signal.excludedArticleAnalysis = {
+          summary: signal.articleAnalysis.summary,
+          analysisBasis: signal.articleAnalysis.analysisBasis,
+          excludedAt: timestamp,
+        };
+      delete signal.articleAnalysis;
+      delete signal.previousArticleAnalysis;
+      signal.summary =
+        signal.feedSummary || "본문과 제목의 관련성을 확인하지 못해 제외된 기사입니다.";
+    }
+    operations.push(
+      db()
+        .prepare("UPDATE signals SET data=? WHERE id=?")
+        .bind(json(signal), id),
+    );
+  }
+  operations.push(
+    db()
+      .prepare(
+        "INSERT INTO article_jobs (signal_id,status,error,updated_at) VALUES (?,'failed',?,?) ON CONFLICT(signal_id) DO UPDATE SET status='failed',error=excluded.error,updated_at=excluded.updated_at",
+      )
+      .bind(id, reason, timestamp),
+    log("본문 수집·검증 실패 기사 제외", id, reason, "서버 자동 분석"),
+  );
+  db().batch(operations);
 }
 module.exports = { contentFor, saveContent, failContent };

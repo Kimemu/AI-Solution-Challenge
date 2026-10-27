@@ -17,6 +17,7 @@
   };
   const state = {
     signals: [],
+    excludedSignalIds: [],
     records: [],
     audit: [],
     runs: [],
@@ -59,8 +60,11 @@
         "서버 응답을 확인할 수 없습니다. start.cmd를 실행해 주세요.",
       );
     const result = await response.json();
-    if (!response.ok)
-      throw new Error(result.error || "요청을 처리하지 못했습니다.");
+    if (!response.ok) {
+      const error = new Error(result.error || "요청을 처리하지 못했습니다.");
+      error.status = response.status;
+      throw error;
+    }
     return result;
   }
   async function load() {
@@ -69,18 +73,26 @@
       const result = await request("state");
       if (current !== requestId) return;
       Object.assign(state, result);
+      state.signals = state.signals.filter(
+        window.OrbitalResearchCore.isArticleVisible,
+      );
       if (ui.modal?.type === "signal") {
         const id = ui.modal.data.id;
         try {
           const latest = await request("signals/" + encodeURIComponent(id));
           if (ui.modal?.type === "signal" && ui.modal.data.id === id) {
-            if (latest.articleJob?.status === "failed") {
+            if (!window.OrbitalResearchCore.isArticleVisible(latest)) {
               ui.modal = null;
               notify("요약에 실패한 기사를 목록에서 제외했습니다.");
             } else ui.modal.data = latest;
           }
-        } catch {
-          /* 목록은 연결된 서버의 응답으로 유지합니다. */
+        } catch (error) {
+          if (
+            error.status === 404 &&
+            ui.modal?.type === "signal" &&
+            ui.modal.data.id === id
+          )
+            ui.modal = null;
         }
       }
       ui.connected = true;
@@ -190,11 +202,14 @@
   }
   function getModel() {
     const seen = new Set();
+    const excluded = new Set(state.excludedSignalIds);
     const contextSignals = [
       ...(research.data.result?.articles || []),
       ...state.signals,
     ].filter((signal) => {
       if (seen.has(signal.id)) return false;
+      if (excluded.has(signal.id)) return false;
+      if (!window.OrbitalResearchCore.isArticleVisible(signal)) return false;
       seen.add(signal.id);
       return true;
     });
@@ -281,16 +296,14 @@
     const position =
       typeof active?.selectionStart === "number" ? active.selectionStart : null;
     if (globe) {
-      savedGlobeView = { ...globe.view, playing: globe.playing };
-      globe.destroy();
-      globe = null;
+      savedGlobeView = { ...globe.view, playing: globe.playing, resumeAt: globe.resumeAt };
     }
+    const shouldFocusGlobe = Boolean(pendingGlobeFocus);
     if (pendingGlobeFocus) {
       savedGlobeView = {
         ...savedGlobeView,
         yaw: -pendingGlobeFocus.lon,
         tilt: Math.max(-55, Math.min(60, pendingGlobeFocus.lat)),
-        playing: false,
       };
       pendingGlobeFocus = null;
     }
@@ -313,12 +326,23 @@
         }
       });
     renderedModalKey = modalKey;
-    if (document.getElementById("globe-root"))
-      globe = new window.OrbitalGlobe(
-        document.getElementById("globe-root"),
-        getModel(),
-        savedGlobeView,
-      );
+    const globeRoot = document.getElementById("globe-root");
+    if (globeRoot) {
+      if (globe) {
+        globeRoot.replaceChildren(globe.scene);
+        if (shouldFocusGlobe) {
+          globe.view.yaw = savedGlobeView.yaw;
+          globe.view.tilt = savedGlobeView.tilt;
+        }
+        globe.update(getModel());
+      } else {
+        globe = new window.OrbitalGlobe(globeRoot, getModel(), savedGlobeView);
+      }
+      if (shouldFocusGlobe) globe.pauseForInteraction();
+    } else if (globe) {
+      globe.destroy();
+      globe = null;
+    }
     if (focusKey) {
       const next = [...root.querySelectorAll("[aria-label],[name]")].find(
         (element) =>

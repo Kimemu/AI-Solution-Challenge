@@ -1,6 +1,7 @@
 /** SQL 접근·기록 변환·중복 제거를 담당합니다. */
 const { env } = require("./sqlite");
 const { json, now, uid } = require("./utils");
+const { enrich } = require("../js/research-core");
 function db() {
   if (!env.DB) throw new Error("저장소 연결을 확인해 주세요.");
   return env.DB;
@@ -61,7 +62,7 @@ async function insertSignals(signals) {
             .bind(
               signal.id,
               signal.url,
-              json({ ...signal, lastSeenAt: signal.collectedAt }),
+              json({ ...enrich(signal), lastSeenAt: signal.collectedAt }),
               signal.collectedAt,
             ),
         };
@@ -79,20 +80,14 @@ async function insertSignals(signals) {
         signalType: signal.signalType,
         lastSeenAt: signal.collectedAt,
         publisherDomain: signal.publisherDomain || current.publisherDomain,
-        countryCodes: signal.countryCodes?.length
-          ? signal.countryCodes
-          : current.countryCodes,
-        countryBasis: signal.countryCodes?.length
-          ? signal.countryBasis
-          : current.countryBasis,
-        countryVersion: signal.countryVersion || current.countryVersion,
+        countryVersion: 0,
       };
       if (!current.articleAnalysis) refreshed.summary = signal.summary;
       return {
         insert: false,
         query: db()
           .prepare("UPDATE signals SET url=?,data=? WHERE id=?")
-          .bind(signal.url, json(refreshed), signal.id),
+          .bind(signal.url, json(enrich(refreshed)), signal.id),
       };
     });
     const results = await db().batch(operations.map(({ query }) => query));

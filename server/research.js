@@ -5,6 +5,7 @@ const { getFeed } = require("./signals");
 const { feedsFor, collectFeeds } = require("./research-sources");
 const {
   scopeOf,
+  isArticleVisible,
   enrich,
   inScope,
   matches,
@@ -28,7 +29,11 @@ const { contentFor, failContent } = require("./article-content");
 const { now, uid, json } = require("./utils");
 const { runStructured } = require("./codex");
 const { validateKeywords } = require("./keywords");
-const { translateKeywordLabels } = require("./headline-translations");
+const {
+  translateKeywordLabels,
+  keywordLabelFor,
+  localizeKeywordRecommendations,
+} = require("./headline-translations");
 const { text, required } = require("./validation");
 const running = new Map();
 function recordQuery(id, kind, data, timestamp = now()) {
@@ -86,6 +91,7 @@ function corpus(scope, ids, includeFailed = false) {
       }))
       .filter(
         (signal) =>
+          (includeFailed || isArticleVisible(signal)) &&
           (!selected || selected.has(signal.id)) &&
           inScope(
             includeFailed ? { ...signal, articleJob: null } : signal,
@@ -121,7 +127,13 @@ function jobById(id) {
     .bind(id)
     .first();
   if (!job) throw new Error("분석 작업을 찾을 수 없습니다.");
-  return { ...job, data: JSON.parse(job.data) };
+  const data = JSON.parse(job.data);
+  return {
+    ...job,
+    data: Array.isArray(data.keywords)
+      ? localizeKeywordRecommendations(data)
+      : data,
+  };
 }
 function updateJob(id, changes = {}) {
   const previous = jobById(id);
@@ -189,7 +201,7 @@ async function startDiscovery(body, dependencies = {}) {
   const job = makeJob("discovery", {
     scope,
     progress: { done: 0, total: feedsFor(scope).length },
-    ...recommend(corpus(scope), scope),
+    ...localizeKeywordRecommendations(recommend(corpus(scope), scope)),
   });
   queueJob(job, dependencies);
   return job;
@@ -241,13 +253,13 @@ async function runDiscovery(id, { fetcher = getFeed } = {}) {
     );
     recommendation.keywords = recommendation.keywords.map((keyword) => ({
       ...keyword,
-      labelKo: labels.get(keyword.word) || keyword.word,
+      labelKo: labels.get(keyword.word) || keywordLabelFor(keyword.word),
     }));
   } catch (error) {
     console.warn("[ORBITAL translation] keyword labels:", error.message);
     recommendation.keywords = recommendation.keywords.map((keyword) => ({
       ...keyword,
-      labelKo: keyword.word,
+      labelKo: keywordLabelFor(keyword.word),
     }));
   }
   const data = {
@@ -292,7 +304,8 @@ function prepareSession(job, articles, gates) {
     .bind(sessionId)
     .first();
   if (existing) return JSON.parse(existing.data);
-  const ideas = ideaDrafts(articles, job.data.keyword, gates).map(
+  const keywordLabel = keywordLabelFor(job.data.keyword) || "선택 키워드";
+  const ideas = ideaDrafts(articles, keywordLabel, gates).map(
     (idea, index) => ({
       ...idea,
       id: `${sessionId}-idea-${index}`,
@@ -305,6 +318,7 @@ function prepareSession(job, articles, gates) {
     id: sessionId,
     jobId: job.id,
     keyword: job.data.keyword,
+    keywordLabel,
     scope: job.data.scope,
     articleIds: articles.map((article) => article.id).slice(0, 500),
     candidateIds: articles.map((article) => article.id).slice(0, 500),
@@ -382,7 +396,7 @@ function createReport(session, ideas) {
     id: session.reportId,
     researchId: session.id,
     focusOpportunityId: best?.id || null,
-    title: `${session.keyword} 기반 사업 아이디어 검토 보고안`,
+    title: `${keywordLabelFor(session.keyword, session.keywordLabel) || "선택 키워드"} 기반 사업 아이디어 검토 보고안`,
     status: insufficient ? "insufficient-evidence" : "draft",
     autoDraft: true,
     provisional: !verified,
@@ -500,11 +514,13 @@ const ideaSchema = {
 const summarySchema = {
   type: "object",
   additionalProperties: false,
-  required: ["id", "summary", "keywords"],
+  required: ["id", "summary", "keywords", "relevant", "rejectionReason"],
   properties: {
     id: string,
     summary: string,
-    keywords: { type: "array", minItems: 3, maxItems: 3, items: string },
+    keywords: { type: "array", minItems: 0, maxItems: 3, items: string },
+    relevant: { type: "boolean" },
+    rejectionReason: string,
   },
 };
 async function batchAI(articles, ideas, keyword, first, context = []) {
@@ -533,7 +549,7 @@ async function batchAI(articles, ideas, keyword, first, context = []) {
   });
   return runStructured(
     schema,
-    "한국어로 기사를 요약하고 사업 아이디어 초안을 구체화하세요. 제공된 id를 정확히 유지하세요. 각 기사 본문 전체를 읽고 한국어 2~3문장 요약과 서로 다른 핵심 키워드 정확히 3개를 반환하세요. 기사 제목만 요약하지 마세요. 본문에 없는 계약규모·성과·날짜·수치·수익을 만들지 마세요. " +
+    "한국어로 기사를 요약하고 사업 아이디어 초안을 구체화하세요. 제공된 id를 정확히 유지하세요. 각 기사마다 먼저 본문이 제목과 같은 사건·주제를 실제로 다루는지 검증하세요. 본문이 회사 소개, 뉴스레터, 사이트 안내, 무관한 기사이거나 제목의 핵심 내용을 확인할 수 없으면 relevant=false, rejectionReason에 한국어 제외 사유, summary와 keywords는 빈 값으로 반환하고 절대 요약하지 마세요. 같은 기사임을 확인한 경우에만 relevant=true, 한국어 2~3문장 요약과 서로 다른 핵심 키워드 정확히 3개를 반환하세요. 본문에 없는 계약규모·성과·날짜·수치·수익을 만들지 마세요. " +
       (first
         ? "아이디어는 제공된 초안의 category를 유지하고 해당 분야의 반복 신호를 묶어 구체적 고객·해결책·수익모델·위험·다음 행동을 작성하세요. customer는 60자 이내 명사구로, problem과 solution은 각각 200자 이내로, revenueModel과 nextStep은 각각 120자 이내로 간결하게 작성하세요. 중복 주의사항은 risks에 모으세요. 아이디어 evidenceIds는 articleContext에 실제로 제공된 본문 요약의 id에서만 선택하세요. 기사 내용을 사실로, 사업 아이디어를 가설로 구분하세요. "
         : "이번에는 ideas를 빈 배열로 반환하세요. ") +
@@ -548,6 +564,10 @@ async function batchAI(articles, ideas, keyword, first, context = []) {
   );
 }
 function storeSummary(article, result) {
+  if (result.relevant === false)
+    throw new Error(
+      `제목과 본문이 일치하지 않아 기사를 제외했습니다: ${text(result.rejectionReason || "본문에서 제목의 내용을 확인할 수 없습니다.", 300)}`,
+    );
   const summary = text(result.summary, 2000),
     keywords = validateKeywords(result);
   if (summary.length < 20 || !/[가-힣]/.test(summary))
@@ -561,6 +581,7 @@ function storeSummary(article, result) {
     content = contentFor(signal);
   if (!content)
     throw new Error("본문을 확보하지 않아 요약을 저장하지 않았습니다.");
+  delete signal.excludedArticleAnalysis;
   const analysis = {
     summary,
     keywords,
@@ -638,7 +659,7 @@ function refineIdeas(session, drafts, output, contextIds = session.articleIds) {
 function reconcileSession(session, articles, failures) {
   const validIds = new Set(articles.map((article) => article.id));
   const fresh = new Map(
-    ideaDrafts(articles, session.keyword, session.gates).map((idea) => [
+    ideaDrafts(articles, keywordLabelFor(session.keyword, session.keywordLabel) || "선택 키워드", session.gates).map((idea) => [
       idea.category,
       idea,
     ]),
@@ -858,13 +879,15 @@ async function runAnalysis(id, { analyzer = batchAI, crawler } = {}) {
     });
     const result = await analyzer(batch, drafts, session.keyword, false, []);
     for (const article of batch) {
+      const output = result.articles?.find((item) => item.id === article.id);
       try {
-        const output = result.articles?.find((item) => item.id === article.id);
         if (!output) throw new Error("본문 요약 결과 누락");
         storeSummary(article, output);
       } catch (error) {
         failures++;
-        failContent(article.id, error.message);
+        failContent(article.id, error.message, {
+          discardSummary: output?.relevant === false,
+        });
       }
       done++;
     }
@@ -1013,7 +1036,10 @@ function resultsFor(id) {
           : article,
       );
   return {
-    session,
+    session: {
+      ...session,
+      keywordLabel: keywordLabelFor(session.keyword, session.keywordLabel),
+    },
     articles,
     countries: countryCounts(articles),
     excluded:
@@ -1025,7 +1051,7 @@ function getOverview(scopeInput) {
   const scope = scopeOf(scopeInput);
   return {
     scope,
-    ...recommend(corpus(scope), scope),
+    ...localizeKeywordRecommendations(recommend(corpus(scope), scope)),
     gates: getSettings(),
     countries,
     templateSources,
